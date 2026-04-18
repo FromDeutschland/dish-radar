@@ -419,6 +419,14 @@ export function createShoppingPlan(dishes) {
   }));
 
   return {
+    inventoryRows: aggregatedRows.map((row) => ({
+      ingredient: row.ingredient,
+      amount: row.amount,
+      unit: row.unit,
+      category: row.category,
+      basePrice: row.basePrice,
+      dishes: [...row.dishes],
+    })),
     recommendedStore,
     rows,
     storeRanking,
