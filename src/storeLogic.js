@@ -266,6 +266,9 @@ const CATEGORY_UNIT_CALORIES = {
 
 const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1Tk4ny0z2fEUUquuvBwBpLQMhTt9BsGpep69l0RmvxmE/edit?gid=0#gid=0";
 export const INGREDIENT_LIBRARY_UPDATED_AT = "2026-04-19";
+const RECIPE_DB_BASE = `${(import.meta.env.BASE_URL || "/").replace(/\/$/, "")}/recipe-db`;
+let recipeDatabaseMetaPromise;
+const recipeDatabaseShardCache = new Map();
 
 const DEFAULT_BASE_PRICES = {
   bakery: 4.2,
@@ -411,6 +414,52 @@ function buildLocalDishLibrary(triedDishes) {
 
 export function getDishLibrarySnapshot(triedDishes = []) {
   return buildLocalDishLibrary(triedDishes);
+}
+
+export async function fetchRecipeDatabaseMeta() {
+  if (!recipeDatabaseMetaPromise) {
+    recipeDatabaseMetaPromise = fetch(`${RECIPE_DB_BASE}/index.json`).then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`Recipe database metadata failed to load (${response.status}).`);
+      }
+      return response.json();
+    });
+  }
+
+  return recipeDatabaseMetaPromise;
+}
+
+async function fetchRecipeShard(shardName) {
+  if (!recipeDatabaseShardCache.has(shardName)) {
+    recipeDatabaseShardCache.set(
+      shardName,
+      fetch(`${RECIPE_DB_BASE}/${shardName}`).then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Recipe database shard failed to load (${response.status}).`);
+        }
+        return response.json();
+      }),
+    );
+  }
+
+  return recipeDatabaseShardCache.get(shardName);
+}
+
+function pickShardNames(metadata, category, count = 1, seed = Date.now()) {
+  const shards = metadata?.categories?.[category]?.shards || [];
+
+  if (!shards.length) {
+    return [];
+  }
+
+  const names = [];
+  const start = seed % shards.length;
+
+  for (let offset = 0; offset < Math.min(count, shards.length); offset += 1) {
+    names.push(shards[(start + offset) % shards.length]);
+  }
+
+  return names;
 }
 
 function scoreDishAgainstPreferences(dish, biasKeywords) {
@@ -915,7 +964,34 @@ function buildSearchPhrase(category, queryIndex, biasKeywords) {
 export async function fetchDishOptions({ categories, triedDishes, limit = 30 }) {
   const activeCategories = categories?.length ? categories : LOCAL_DISH_LIBRARY_KEYS;
   const biasKeywords = extractPreferenceKeywords(triedDishes);
-  const library = buildLocalDishLibrary(triedDishes);
+  const localLibrary = buildLocalDishLibrary(triedDishes);
+  let remoteLibrary = [];
+
+  try {
+    const metadata = await fetchRecipeDatabaseMeta();
+    const timeSeed = Math.floor(Date.now() / 60000);
+    const shardPromises = activeCategories.flatMap((category, index) => {
+      const shardNames = pickShardNames(metadata, category, activeCategories.length === 1 ? 2 : 1, timeSeed + index);
+      return shardNames.map((shardName) => fetchRecipeShard(shardName));
+    });
+
+    const shardResults = await Promise.all(shardPromises);
+    remoteLibrary = shardResults
+      .flat()
+      .map(normalizeLocalDish)
+      .filter((dish) => activeCategories.includes(dish.category));
+  } catch {
+    remoteLibrary = [];
+  }
+
+  const mergedLibrary = new Map();
+  [...localLibrary, ...remoteLibrary].forEach((dish) => {
+    if (!mergedLibrary.has(dish.id)) {
+      mergedLibrary.set(dish.id, dish);
+    }
+  });
+
+  const library = Array.from(mergedLibrary.values());
   const scored = library
     .filter((dish) => activeCategories.includes(dish.category))
     .map((dish) => {

@@ -4,6 +4,7 @@ import {
   createShoppingPlan,
   estimateDishCalories,
   fetchDishOptions,
+  fetchRecipeDatabaseMeta,
   formatCalories,
   formatCurrency,
   getDishLibrarySnapshot,
@@ -107,6 +108,11 @@ function buildReviewDraft(records) {
     made: true,
     rating: record.rating || 0,
   }));
+}
+
+function toNumberOrZero(value) {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function getDefaultWeekSelections() {
@@ -336,6 +342,8 @@ function App() {
   const [pantryStockDraft, setPantryStockDraft] = useState({ ingredient: "", amount: "1", unit: "jar", category: "pantry" });
   const [fetchState, setFetchState] = useState({ error: "", biasKeywords: [], exportMessage: "" });
   const [helpOpen, setHelpOpen] = useState(false);
+  const [recipeDatabaseMeta, setRecipeDatabaseMeta] = useState(null);
+  const [selectedArchiveId, setSelectedArchiveId] = useState(null);
   const [reviewModal, setReviewModal] = useState({ open: false, records: [] });
   const [dayPicker, setDayPicker] = useState({
     dayName: "",
@@ -372,6 +380,13 @@ function App() {
     })
     .filter(Boolean);
   const currentShoppingPlan = selectedDayEntries.length ? createShoppingPlan(selectedDayEntries.map((entry) => entry.dish)) : null;
+  const selectedArchive = useMemo(() => {
+    if (!archivedLists.length) {
+      return null;
+    }
+
+    return archivedLists.find((archive) => archive.id === selectedArchiveId) || archivedLists[0];
+  }, [archivedLists, selectedArchiveId]);
   const sourceMix = useMemo(() => {
     const counts = new Map();
 
@@ -385,7 +400,7 @@ function App() {
       .slice(0, 4)
       .map(([source, count]) => ({ source, count }));
   }, [selectedDayEntries]);
-  const dishLibrary = useMemo(() => getDishLibrarySnapshot(ratingHistory), [ratingHistory]);
+  const baseDishLibrary = useMemo(() => getDishLibrarySnapshot([]), []);
   const pantryInventoryLookup = useMemo(
     () => new Map(pantryInventory.map((item) => [ingredientKey(item.ingredientId, item.ingredient, item.unit), item])),
     [pantryInventory],
@@ -456,7 +471,7 @@ function App() {
       .sort((left, right) => right.average - left.average || right.count - left.count)
       .slice(0, 5);
     const uniqueIngredients = new Set(
-      dishLibrary.flatMap((dish) => (dish.ingredients || []).map((ingredient) => normalizeIngredient(ingredient.name))),
+      baseDishLibrary.flatMap((dish) => (dish.ingredients || []).map((ingredient) => normalizeIngredient(ingredient.name))),
     );
     const lastArchive = archivedLists[0];
 
@@ -473,16 +488,16 @@ function App() {
       topStore: Object.entries(storeCounts).sort((left, right) => right[1] - left[1])[0]?.[0] || "None yet",
       pendingReviews: triedDishes.length,
       pantryLines: pantryInventory.length + manualPantryItems.length,
-      totalLibraryDishes: dishLibrary.length,
-      totalLibraryIngredients: uniqueIngredients.size,
-      lastIngredientUpdate: INGREDIENT_LIBRARY_UPDATED_AT,
+      totalLibraryDishes: (recipeDatabaseMeta?.totalDishCount || 0) + baseDishLibrary.length,
+      totalLibraryIngredients: recipeDatabaseMeta?.uniqueIngredientCount || uniqueIngredients.size,
+      lastIngredientUpdate: recipeDatabaseMeta?.generatedAt || INGREDIENT_LIBRARY_UPDATED_AT,
       topDishes,
       recentRatings: ratedRecords
         .slice()
         .sort((left, right) => new Date(right.confirmedAt).getTime() - new Date(left.confirmedAt).getTime())
         .slice(0, 6),
     };
-  }, [archivedLists, dishLibrary, manualPantryItems.length, pantryInventory.length, ratingHistory, triedDishes.length]);
+  }, [archivedLists, baseDishLibrary, manualPantryItems.length, pantryInventory.length, ratingHistory, recipeDatabaseMeta, triedDishes.length]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.activeTab, JSON.stringify(activeTab));
@@ -529,12 +544,46 @@ function App() {
   }, [ratingHistory]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    fetchRecipeDatabaseMeta()
+      .then((metadata) => {
+        if (!cancelled) {
+          setRecipeDatabaseMeta(metadata);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRecipeDatabaseMeta(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     setWishlistIds((current) => current.filter((id) => dishLookup[id]));
     setDeckIds((current) => current.filter((id) => dishLookup[id]));
     setDayDishSelections((current) => Object.fromEntries(
       Object.entries(current).filter(([, dishId]) => dishLookup[dishId]),
     ));
   }, [dishLookup]);
+
+  useEffect(() => {
+    if (!archivedLists.length) {
+      if (selectedArchiveId !== null) {
+        setSelectedArchiveId(null);
+      }
+      return;
+    }
+
+    const hasSelected = archivedLists.some((archive) => archive.id === selectedArchiveId);
+    if (!hasSelected) {
+      setSelectedArchiveId(archivedLists[0].id);
+    }
+  }, [archivedLists, selectedArchiveId]);
 
   async function refreshDeck(nextSelections = weekSelections) {
     const dayToRefresh = dayPicker.dayName && nextSelections[dayPicker.dayName]
@@ -806,6 +855,16 @@ function App() {
     setPantryInventory((current) => current.filter((item) => ingredientKey(item.ingredientId, item.ingredient, item.unit) !== itemKey));
   }
 
+  function resetPantryAll() {
+    const confirmed = window.confirm("Reset all pantry inventory and pantry notes?");
+    if (!confirmed) {
+      return;
+    }
+
+    setPantryInventory([]);
+    setManualPantryItems([]);
+  }
+
   function openReadyToShop() {
     if (!selectedDayEntries.length) {
       return;
@@ -858,6 +917,117 @@ function App() {
     await copyText(JSON.stringify(archive, null, 2));
   }
 
+  function updateArchive(archiveId, updater) {
+    setArchivedLists((current) => current.map((archive) => (
+      archive.id === archiveId ? updater(archive) : archive
+    )));
+  }
+
+  function updateArchiveMeta(archiveId, field, value) {
+    updateArchive(archiveId, (archive) => {
+      if (field === "weekLabel" || field === "exportMessage") {
+        return { ...archive, [field]: value };
+      }
+
+      if (field === "storeName") {
+        return {
+          ...archive,
+          recommendedStore: {
+            ...archive.recommendedStore,
+            name: value,
+          },
+        };
+      }
+
+      if (field === "estimatedTotal") {
+        return {
+          ...archive,
+          recommendedStore: {
+            ...archive.recommendedStore,
+            estimatedTotal: toNumberOrZero(value),
+          },
+        };
+      }
+
+      if (field === "reason") {
+        return {
+          ...archive,
+          recommendedStore: {
+            ...archive.recommendedStore,
+            reason: value,
+          },
+        };
+      }
+
+      return archive;
+    });
+  }
+
+  function updateArchiveDish(archiveId, dishIndex, field, value) {
+    updateArchive(archiveId, (archive) => ({
+      ...archive,
+      selectedDishes: (archive.selectedDishes || []).map((dish, index) => {
+        if (index !== dishIndex) {
+          return dish;
+        }
+
+        return {
+          ...dish,
+          [field]: field === "calories" ? toNumberOrZero(value) : value,
+        };
+      }),
+    }));
+  }
+
+  function updateArchiveRow(archiveId, rowIndex, field, value) {
+    updateArchive(archiveId, (archive) => ({
+      ...archive,
+      rows: (archive.rows || []).map((row, index) => {
+        if (index !== rowIndex) {
+          return row;
+        }
+
+        return {
+          ...row,
+          [field]: field === "expectedPrice" ? toNumberOrZero(value) : value,
+        };
+      }),
+    }));
+  }
+
+  function addArchiveRow(archiveId) {
+    updateArchive(archiveId, (archive) => ({
+      ...archive,
+      rows: [
+        ...(archive.rows || []),
+        {
+          ingredient: "",
+          qty: "1 box",
+          expectedPrice: 0,
+          dishUsedIn: "",
+          pantryFlag: "Buy",
+          pantryNote: "",
+        },
+      ],
+    }));
+  }
+
+  function removeArchiveRow(archiveId, rowIndex) {
+    updateArchive(archiveId, (archive) => ({
+      ...archive,
+      rows: (archive.rows || []).filter((_, index) => index !== rowIndex),
+    }));
+  }
+
+  function removeArchive(archiveId) {
+    const confirmed = window.confirm("Delete this archived grocery list?");
+    if (!confirmed) {
+      return;
+    }
+
+    setArchivedLists((current) => current.filter((archive) => archive.id !== archiveId));
+  }
+
   function renderPlannerTab() {
     return (
       <div className="workspace">
@@ -898,8 +1068,17 @@ function App() {
                       <span className="chip chip-primary">{CATEGORY_LABELS[weekSelections[day.key]]}</span>
                       {dayDishSelections[day.key] && dishLookup[dayDishSelections[day.key]] ? (
                         <div className="day-picked-card">
-                          <strong>{dishLookup[dayDishSelections[day.key]].name}</strong>
-                          <p>{formatCalories(estimateDishCalories(dishLookup[dayDishSelections[day.key]]))} cal est. • {dishLookup[dayDishSelections[day.key]].time} min</p>
+                          <strong className="day-picked-title">{dishLookup[dayDishSelections[day.key]].name}</strong>
+                          <div className="day-picked-stats">
+                            <div>
+                              <span>Calories</span>
+                              <strong>{formatCalories(estimateDishCalories(dishLookup[dayDishSelections[day.key]]))}</strong>
+                            </div>
+                            <div>
+                              <span>Time</span>
+                              <strong>{dishLookup[dayDishSelections[day.key]].time} min</strong>
+                            </div>
+                          </div>
                           <div className="mini-action-row">
                             <button className="mini-button" onClick={() => openDayDishPicker(day.key, weekSelections[day.key])}>
                               Change dish
@@ -1116,6 +1295,72 @@ function App() {
               </p>
             )}
           </section>
+
+          {archivedLists.length ? (
+            <section className="panel">
+              <div className="panel-head">
+                <div>
+                  <div className="eyebrow">Past grocery lists</div>
+                  <h2>Click a previous week to see what was bought</h2>
+                </div>
+              </div>
+
+              <div className="archive-selector-row">
+                {archivedLists.map((archive) => (
+                  <button
+                    key={archive.id}
+                    className={`archive-selector-button ${selectedArchive?.id === archive.id ? "active" : ""}`}
+                    onClick={() => setSelectedArchiveId(archive.id)}
+                  >
+                    <strong>{archive.weekLabel}</strong>
+                    <span>{archive.recommendedStore?.name || "Store pending"}</span>
+                  </button>
+                ))}
+              </div>
+
+              {selectedArchive ? (
+                <div className="archive-preview-card">
+                  <div className="archive-preview-meta">
+                    <div>
+                      <span>Week</span>
+                      <strong>{selectedArchive.weekLabel}</strong>
+                    </div>
+                    <div>
+                      <span>Store</span>
+                      <strong>{selectedArchive.recommendedStore?.name || "Store pending"}</strong>
+                    </div>
+                    <div>
+                      <span>Expected total</span>
+                      <strong>{formatCurrency(selectedArchive.recommendedStore?.estimatedTotal || 0)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="table-wrap">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Ingredient</th>
+                          <th>Qty</th>
+                          <th>Expected Price</th>
+                          <th>Dish used in</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(selectedArchive.rows || []).map((row, index) => (
+                          <tr key={`${selectedArchive.id}-preview-${index}`}>
+                            <td>{row.ingredient}</td>
+                            <td>{row.qty}</td>
+                            <td>{formatCurrency(row.expectedPrice || 0)}</td>
+                            <td>{row.dishUsedIn || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          ) : null}
         </section>
       </div>
     );
@@ -1131,6 +1376,9 @@ function App() {
                 <div className="eyebrow">Pantry leftovers</div>
                 <h2>Stored until fully consumed and always editable</h2>
               </div>
+              <button className="text-button" onClick={resetPantryAll}>
+                Reset all
+              </button>
             </div>
 
             <p className="empty-copy">
@@ -1367,6 +1615,41 @@ function App() {
                         <button className="mini-button" onClick={() => copyArchivePayload(archive)}>
                           Copy JSON
                         </button>
+                        <button className="mini-button" onClick={() => removeArchive(archive.id)}>
+                          Delete list
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="archive-edit-grid">
+                      <div className="archive-edit-card">
+                        <label>Week label</label>
+                        <input
+                          className="table-input"
+                          type="text"
+                          value={archive.weekLabel}
+                          onChange={(event) => updateArchiveMeta(archive.id, "weekLabel", event.target.value)}
+                        />
+                      </div>
+                      <div className="archive-edit-card">
+                        <label>Store</label>
+                        <input
+                          className="table-input"
+                          type="text"
+                          value={archive.recommendedStore.name}
+                          onChange={(event) => updateArchiveMeta(archive.id, "storeName", event.target.value)}
+                        />
+                      </div>
+                      <div className="archive-edit-card">
+                        <label>Estimated total</label>
+                        <input
+                          className="table-input"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={archive.recommendedStore.estimatedTotal}
+                          onChange={(event) => updateArchiveMeta(archive.id, "estimatedTotal", event.target.value)}
+                        />
                       </div>
                     </div>
 
@@ -1375,19 +1658,135 @@ function App() {
                       <span className="chip">{formatCurrency(archive.recommendedStore.estimatedTotal)}</span>
                     </div>
 
-                    <div className="archive-dishes">
-                      {(archive.selectedDishes || []).map((snapshot) => (
-                        <div key={`${snapshot.dayName || "day"}-${snapshot.id}`} className="archive-dish-row">
-                          <div>
-                            <strong>{snapshot.dayName ? `${snapshot.dayName}: ${snapshot.name}` : snapshot.name}</strong>
-                            <p>{CATEGORY_LABELS[snapshot.category]}</p>
-                          </div>
-                          <span className="chip">{formatCalories(snapshot.calories)} cal est.</span>
+                    <div className="archive-edit-card archive-reason-card">
+                      <label>Why this store</label>
+                      <textarea
+                        className="table-input archive-textarea"
+                        value={archive.recommendedStore.reason}
+                        onChange={(event) => updateArchiveMeta(archive.id, "reason", event.target.value)}
+                      />
+                    </div>
+
+                    <div className="archive-dishes archive-edit-section">
+                      <div className="archive-section-head">
+                        <strong>Selected dishes</strong>
+                      </div>
+                      {(archive.selectedDishes || []).map((snapshot, snapshotIndex) => (
+                        <div key={`${snapshot.dayName || "day"}-${snapshot.id}`} className="archive-dish-editor">
+                          <input
+                            className="table-input"
+                            type="text"
+                            value={snapshot.dayName || ""}
+                            onChange={(event) => updateArchiveDish(archive.id, snapshotIndex, "dayName", event.target.value)}
+                            placeholder="Day"
+                          />
+                          <input
+                            className="table-input"
+                            type="text"
+                            value={snapshot.name}
+                            onChange={(event) => updateArchiveDish(archive.id, snapshotIndex, "name", event.target.value)}
+                            placeholder="Dish"
+                          />
+                          <select
+                            className="table-input"
+                            value={snapshot.category}
+                            onChange={(event) => updateArchiveDish(archive.id, snapshotIndex, "category", event.target.value)}
+                          >
+                            {CATEGORY_OPTIONS.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            className="table-input"
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={snapshot.calories}
+                            onChange={(event) => updateArchiveDish(archive.id, snapshotIndex, "calories", event.target.value)}
+                            placeholder="Calories"
+                          />
                         </div>
                       ))}
                     </div>
 
-                    {archive.exportMessage ? <p className="summary-copy subtle">{archive.exportMessage}</p> : null}
+                    <div className="archive-edit-section">
+                      <div className="archive-section-head">
+                        <strong>Archived grocery rows</strong>
+                        <button className="mini-button" onClick={() => addArchiveRow(archive.id)}>
+                          Add row
+                        </button>
+                      </div>
+
+                      <div className="table-wrap">
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Ingredient</th>
+                              <th>Qty</th>
+                              <th>Expected Price</th>
+                              <th>Dish used in</th>
+                              <th>Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(archive.rows || []).map((row, rowIndex) => (
+                              <tr key={`${archive.id}-row-${rowIndex}`}>
+                                <td>
+                                  <input
+                                    className="table-input"
+                                    type="text"
+                                    value={row.ingredient}
+                                    onChange={(event) => updateArchiveRow(archive.id, rowIndex, "ingredient", event.target.value)}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="table-input"
+                                    type="text"
+                                    value={row.qty}
+                                    onChange={(event) => updateArchiveRow(archive.id, rowIndex, "qty", event.target.value)}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="table-input"
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={row.expectedPrice}
+                                    onChange={(event) => updateArchiveRow(archive.id, rowIndex, "expectedPrice", event.target.value)}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    className="table-input"
+                                    type="text"
+                                    value={row.dishUsedIn}
+                                    onChange={(event) => updateArchiveRow(archive.id, rowIndex, "dishUsedIn", event.target.value)}
+                                  />
+                                </td>
+                                <td>
+                                  <button className="mini-button" onClick={() => removeArchiveRow(archive.id, rowIndex)}>
+                                    Delete
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div className="archive-edit-card archive-reason-card">
+                      <label>Export note</label>
+                      <textarea
+                        className="table-input archive-textarea"
+                        value={archive.exportMessage || ""}
+                        onChange={(event) => updateArchiveMeta(archive.id, "exportMessage", event.target.value)}
+                      />
+                    </div>
                   </article>
                 ))}
               </div>
@@ -1671,23 +2070,59 @@ function App() {
 
   return (
     <div className="page-shell">
-      <nav className="tab-row" aria-label="Main sections">
-        {TABS.map((tab) => (
-          <button
-            key={tab.value}
-            className={`tab-button ${activeTab === tab.value ? "active" : ""}`}
-            onClick={() => setActiveTab(tab.value)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+      <header className="site-header">
+        <div className="brand-block">
+          <span className="brand-mark">Dish<br />Radar</span>
+          <p>Luxury weekly dinner planning, pantry memory, and grocery flow.</p>
+        </div>
 
-      {activeTab === "planner" ? renderPlannerTab() : null}
-      {activeTab === "groceries" ? renderGroceriesTab() : null}
-      {activeTab === "pantry" ? renderPantryTab() : null}
-      {activeTab === "grocery-lists" ? renderArchivedListsTab() : null}
-      {activeTab === "analytics" ? renderAnalyticsTab() : null}
+        <nav className="tab-row" aria-label="Main sections">
+          {TABS.map((tab) => (
+            <button
+              key={tab.value}
+              className={`tab-button ${activeTab === tab.value ? "active" : ""}`}
+              onClick={() => setActiveTab(tab.value)}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+
+        <div className="header-actions">
+          <button className="ghost-button header-help-button" onClick={() => setHelpOpen(true)}>
+            Help
+          </button>
+        </div>
+      </header>
+
+      <main className="content-shell">
+        {activeTab === "planner" ? (
+          <section className="intro-hero">
+            <div className="hero-copy">
+              <span className="eyebrow">Weekly planning atelier</span>
+              <h1>Plan beautifully. Shop once. Remember what is already at home.</h1>
+              <p>
+                Select a dish style for each day, lock in exact recipes, keep pantry leftovers live,
+                and edit every archived grocery run whenever you need to.
+              </p>
+            </div>
+            <div className="hero-frame" aria-hidden="true">
+              <div className="hero-arch">
+                <div className="hero-arch-lines" />
+                <div className="hero-orb hero-orb-top" />
+                <div className="hero-orb hero-orb-bottom" />
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {activeTab === "planner" ? renderPlannerTab() : null}
+        {activeTab === "groceries" ? renderGroceriesTab() : null}
+        {activeTab === "pantry" ? renderPantryTab() : null}
+        {activeTab === "grocery-lists" ? renderArchivedListsTab() : null}
+        {activeTab === "analytics" ? renderAnalyticsTab() : null}
+      </main>
+
       <div className="page-help-bar">
         <button className="ghost-button help-button" onClick={() => setHelpOpen(true)}>
           Help

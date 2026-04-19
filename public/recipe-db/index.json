@@ -1,0 +1,61 @@
+{
+  "generatedAt": "2026-04-19",
+  "totalDishCount": 48000,
+  "uniqueIngredientCount": 7344,
+  "categories": {
+    "salads-veggie-bowls": {
+      "count": 8000,
+      "shards": [
+        "salads-veggie-bowls-1.json",
+        "salads-veggie-bowls-2.json",
+        "salads-veggie-bowls-3.json",
+        "salads-veggie-bowls-4.json"
+      ]
+    },
+    "balanced-plate": {
+      "count": 8000,
+      "shards": [
+        "balanced-plate-1.json",
+        "balanced-plate-2.json",
+        "balanced-plate-3.json",
+        "balanced-plate-4.json"
+      ]
+    },
+    "pasta-noodles": {
+      "count": 8000,
+      "shards": [
+        "pasta-noodles-1.json",
+        "pasta-noodles-2.json",
+        "pasta-noodles-3.json",
+        "pasta-noodles-4.json"
+      ]
+    },
+    "one-pot": {
+      "count": 8000,
+      "shards": [
+        "one-pot-1.json",
+        "one-pot-2.json",
+        "one-pot-3.json",
+        "one-pot-4.json"
+      ]
+    },
+    "handhelds-casual": {
+      "count": 8000,
+      "shards": [
+        "handhelds-casual-1.json",
+        "handhelds-casual-2.json",
+        "handhelds-casual-3.json",
+        "handhelds-casual-4.json"
+      ]
+    },
+    "soups-stews-chilis": {
+      "count": 8000,
+      "shards": [
+        "soups-stews-chilis-1.json",
+        "soups-stews-chilis-2.json",
+        "soups-stews-chilis-3.json",
+        "soups-stews-chilis-4.json"
+      ]
+    }
+  }
+}
