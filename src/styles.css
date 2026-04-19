@@ -200,6 +200,28 @@ button {
   padding: 12px;
 }
 
+.day-selection-block {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.day-picked-card,
+.modal-option-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 16px;
+  border: 1px solid rgba(120, 94, 62, 0.1);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.day-picked-card strong,
+.modal-option-card strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
 .day-name {
   display: block;
   font-weight: 800;
@@ -639,6 +661,38 @@ th {
   box-shadow: 0 16px 26px rgba(217, 119, 6, 0.2);
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(45, 36, 24, 0.34);
+  backdrop-filter: blur(8px);
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  z-index: 50;
+}
+
+.modal-card {
+  width: min(980px, 100%);
+  max-height: min(88vh, 920px);
+  overflow: auto;
+  border-radius: 28px;
+  padding: 16px;
+  background: rgba(255, 251, 245, 0.96);
+  border: 1px solid rgba(120, 94, 62, 0.12);
+  box-shadow: 0 24px 60px rgba(120, 94, 62, 0.18);
+}
+
+.modal-option-list {
+  display: grid;
+  gap: 8px;
+}
+
+.modal-option-card {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+}
+
 @media (max-width: 1240px) {
   .day-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -678,7 +732,8 @@ th {
   .dish-list-head,
   .wishlist-item,
   .archive-head,
-  .archive-dish-row {
+  .archive-dish-row,
+  .modal-option-card {
     grid-template-columns: 1fr;
     display: grid;
   }

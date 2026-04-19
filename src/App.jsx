@@ -1,16 +1,20 @@
 import { useEffect, useMemo, useState } from "react";
-import { DISH_POOL } from "./mockDishPool";
 import {
+  buildGoogleSheetPayload,
   createShoppingPlan,
   estimateDishCalories,
+  fetchEdamamRecipes,
   formatCalories,
   formatCurrency,
+  pushShoppingPlanToGoogleSheet,
 } from "./storeLogic";
 
 const STORAGE_KEYS = {
   activeTab: "dish-radar.active-tab",
   archivedLists: "dish-radar.archived-lists",
   deckIds: "dish-radar.deck-ids",
+  dayDishSelections: "dish-radar.day-dish-selections",
+  dishCatalog: "dish-radar.dish-catalog",
   manualPantryItems: "dish-radar.manual-pantry-items",
   pantryInventory: "dish-radar.pantry-inventory",
   triedDishes: "dish-radar.tried-dishes",
@@ -53,81 +57,16 @@ const PANTRY_STATUSES = [
 
 const WORKFLOW_STEPS = [
   "1. Pick meal types for the week.",
-  "2. Save dishes to the wishlist.",
-  "3. Review the Grocery List tab.",
-  "4. Click Go Shop and confirm the week.",
-  "5. Pantry leftovers stay stored until consumed.",
+  "2. Choose a dish type for a day.",
+  "3. Pick that day’s dish from 50 live options.",
+  "4. Review the Grocery List tab.",
+  "5. Click Go Shop to export the final list and update pantry leftovers.",
 ];
 
-const PREFERRED_RECIPE_SOURCES = ["Food.com", "Allrecipes.com", "BigOven", "Meal-Master"];
+const SHEET_URL = "https://docs.google.com/spreadsheets/d/1Tk4ny0z2fEUUquuvBwBpLQMhTt9BsGpep69l0RmvxmE/edit?gid=0#gid=0";
 
 const CATEGORY_LABELS = Object.fromEntries(CATEGORY_OPTIONS.map((option) => [option.value, option.label]));
 const PANTRY_STATUS_LABELS = Object.fromEntries(PANTRY_STATUSES.map((option) => [option.value, option.label]));
-
-const DISH_CATEGORY_MAP = {
-  "spicy-vodka-gemelli": "pasta-noodles",
-  "crispy-rice-salmon-bowls": "balanced-plate",
-  "chili-crisp-gnocchi": "pasta-noodles",
-  "sheet-pan-shawarma-chicken": "balanced-plate",
-  "green-goddess-wraps": "salads-veggie-bowls",
-  "hot-honey-halloumi-tacos": "handhelds-casual",
-  "miso-butter-mushroom-udon": "pasta-noodles",
-  "smash-burger-salad": "salads-veggie-bowls",
-  "lemony-orzo-chicken": "one-pot",
-  "birria-grilled-cheese": "handhelds-casual",
-  "pesto-white-bean-toast": "handhelds-casual",
-  "korean-corn-cheese-bowls": "balanced-plate",
-  "coconut-curry-dumpling-soup": "soups-stews-chilis",
-  "crispy-feta-farro": "salads-veggie-bowls",
-  "shrimp-taco-bowls": "balanced-plate",
-  "onion-miso-pasta": "pasta-noodles",
-  "sesame-ginger-meatballs": "balanced-plate",
-  "elote-pasta-salad": "salads-veggie-bowls",
-  "tofu-banh-mi-bowls": "balanced-plate",
-  "vodka-meatball-subs": "handhelds-casual",
-  "buffalo-chickpea-flatbreads": "handhelds-casual",
-  "pesto-burrata-pizza": "handhelds-casual",
-  "kimchi-grilled-cheese-soup": "soups-stews-chilis",
-  "harissa-salmon-couscous": "balanced-plate",
-  "street-corn-gnocchi-skillet": "one-pot",
-  "tandoori-chicken-naan": "handhelds-casual",
-  "turkey-taco-soup": "soups-stews-chilis",
-  "crispy-potato-caesar": "salads-veggie-bowls",
-  "peach-burrata-toast": "handhelds-casual",
-  "red-pepper-feta-lentils": "salads-veggie-bowls",
-  "honey-soy-lettuce-cups": "handhelds-casual",
-  "al-pastor-chicken-bowls": "balanced-plate",
-  "broccoli-cheddar-pot-pies": "one-pot",
-  "chili-lime-shrimp-tostadas": "handhelds-casual",
-  "spicy-peanut-cucumber-noodles": "pasta-noodles",
-  "loaded-potato-quesadillas": "handhelds-casual",
-  "thai-peanut-chicken-slaw": "salads-veggie-bowls",
-  "mediterranean-chickpea-cucumber-salad": "salads-veggie-bowls",
-  "brussels-apple-farro-salad": "salads-veggie-bowls",
-  "roasted-broccoli-caesar-lentils": "salads-veggie-bowls",
-  "sticky-gochujang-meatball-bowls": "balanced-plate",
-  "lemon-dill-salmon-potatoes": "balanced-plate",
-  "street-cart-chicken-rice": "balanced-plate",
-  "miso-sesame-sweet-potato-bowls": "balanced-plate",
-  "creamy-corn-miso-rigatoni": "pasta-noodles",
-  "roasted-red-pepper-tortellini": "pasta-noodles",
-  "sesame-garlic-chicken-ramen": "pasta-noodles",
-  "spinach-artichoke-orzo-bake": "pasta-noodles",
-  "marry-me-chickpeas-orzo": "one-pot",
-  "smoky-sausage-white-beans": "one-pot",
-  "coconut-chicken-rice-pot": "one-pot",
-  "tomato-basil-risoni-skillet": "one-pot",
-  "smash-chicken-caesar-wraps": "handhelds-casual",
-  "greek-turkey-pita-burgers": "handhelds-casual",
-  "chipotle-black-bean-crunchwraps": "handhelds-casual",
-  "bbq-salmon-slaw-sliders": "handhelds-casual",
-  "white-chicken-enchilada-soup": "soups-stews-chilis",
-  "lasagna-soup": "soups-stews-chilis",
-  "smoky-lentil-sweet-potato-chili": "soups-stews-chilis",
-  "ginger-coconut-rice-soup": "soups-stews-chilis",
-};
-
-const DISH_LOOKUP = Object.fromEntries(DISH_POOL.map((dish) => [dish.id, dish]));
 
 function safeRead(key, fallback) {
   try {
@@ -138,21 +77,12 @@ function safeRead(key, fallback) {
   }
 }
 
-function shuffle(items) {
-  const copy = [...items];
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const randomIndex = Math.floor(Math.random() * (index + 1));
-    [copy[index], copy[randomIndex]] = [copy[randomIndex], copy[index]];
-  }
-  return copy;
-}
-
 function normalizeIngredient(value) {
-  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, " ");
+  return `${value || ""}`.toLowerCase().trim().replace(/[^a-z0-9]+/g, " ");
 }
 
-function ingredientKey(name, unit) {
-  return `${normalizeIngredient(name)}::${unit}`;
+function ingredientKey(ingredientId, ingredientName, unit) {
+  return `${ingredientId || normalizeIngredient(ingredientName)}::${unit || ""}`;
 }
 
 function roundAmount(value) {
@@ -204,88 +134,8 @@ function getDifficultyLabel(time) {
   return "hard";
 }
 
-function getPrimaryRecipeSource(dish) {
-  return PREFERRED_RECIPE_SOURCES.find((source) => dish.sources.includes(source)) || dish.sources[0] || "Other";
-}
-
-function sortByPreference(items, triedDishes) {
-  return shuffle(items).sort((left, right) => {
-    const preferenceDelta = getDishPreferenceScore(right, triedDishes) - getDishPreferenceScore(left, triedDishes);
-
-    if (preferenceDelta !== 0) {
-      return preferenceDelta;
-    }
-
-    const rightSourceBoost = right.sources.filter((source) => PREFERRED_RECIPE_SOURCES.includes(source)).length;
-    const leftSourceBoost = left.sources.filter((source) => PREFERRED_RECIPE_SOURCES.includes(source)).length;
-
-    return rightSourceBoost - leftSourceBoost;
-  });
-}
-
-function interleaveBySource(items, triedDishes) {
-  const buckets = new Map();
-
-  sortByPreference(items, triedDishes).forEach((dish) => {
-    const source = getPrimaryRecipeSource(dish);
-    const bucket = buckets.get(source) || [];
-    bucket.push(dish);
-    buckets.set(source, bucket);
-  });
-
-  const orderedSources = [
-    ...PREFERRED_RECIPE_SOURCES.filter((source) => buckets.has(source)),
-    ...Array.from(buckets.keys()).filter((source) => !PREFERRED_RECIPE_SOURCES.includes(source)).sort(),
-  ];
-
-  const result = [];
-  let added = true;
-
-  while (added) {
-    added = false;
-
-    orderedSources.forEach((source) => {
-      const bucket = buckets.get(source);
-
-      if (bucket?.length) {
-        result.push(bucket.shift());
-        added = true;
-      }
-    });
-  }
-
-  return result;
-}
-
-function getDishPreferenceScore(candidateDish, triedDishes) {
-  return triedDishes.reduce((score, record) => {
-    if (!record.rating) {
-      return score;
-    }
-
-    const triedDish = DISH_LOOKUP[record.dishId];
-    if (!triedDish) {
-      return score;
-    }
-
-    const sentiment = record.rating - 3;
-    const sharedTags = candidateDish.tags.filter((tag) => triedDish.tags.includes(tag)).length;
-    const sameCategory = DISH_CATEGORY_MAP[candidateDish.id] === DISH_CATEGORY_MAP[triedDish.id];
-
-    return score + (sharedTags * sentiment * 1.35) + (sameCategory ? sentiment * 3.2 : 0);
-  }, 0);
-}
-
-function buildDeck(weekSelections, triedDishes = []) {
-  const selectedCategories = getSelectedCategories(weekSelections);
-  const matching = selectedCategories.length
-    ? DISH_POOL.filter((dish) => selectedCategories.includes(DISH_CATEGORY_MAP[dish.id]))
-    : DISH_POOL;
-  const fallback = DISH_POOL.filter((dish) => !matching.some((match) => match.id === dish.id));
-
-  return [...interleaveBySource(matching, triedDishes), ...interleaveBySource(fallback, triedDishes)]
-    .slice(0, 30)
-    .map((dish) => dish.id);
+function getDishCategory(dish) {
+  return dish?.category || "";
 }
 
 function getCurrentWeekDates() {
@@ -361,11 +211,11 @@ function getEstimatedUsageAmount(row) {
 
 function mergePantryAfterShop(currentPantry, inventoryRows) {
   const pantryMap = new Map(
-    currentPantry.map((item) => [ingredientKey(item.ingredient, item.unit), { ...item }]),
+    currentPantry.map((item) => [ingredientKey(item.ingredientId, item.ingredient, item.unit), { ...item }]),
   );
 
   inventoryRows.forEach((row) => {
-    const key = ingredientKey(row.ingredient, row.unit);
+    const key = ingredientKey(row.ingredientId, row.ingredient, row.unit);
     const existing = pantryMap.get(key);
     const pantryBefore = existing?.amount ?? 0;
     const usageAmount = getEstimatedUsageAmount(row);
@@ -382,6 +232,7 @@ function mergePantryAfterShop(currentPantry, inventoryRows) {
 
     if (roundedAfter > 0.01) {
       pantryMap.set(key, {
+        ingredientId: row.ingredientId || "",
         ingredient: row.ingredient,
         unit: row.unit,
         amount: roundedAfter,
@@ -397,6 +248,18 @@ function mergePantryAfterShop(currentPantry, inventoryRows) {
 
 function copyText(text) {
   return navigator.clipboard.writeText(text);
+}
+
+function buildSheetName(weekDays) {
+  return `Dish Radar ${weekDays[0].shortDate}-${weekDays[6].shortDate}`;
+}
+
+function mergeDishCatalog(currentCatalog, nextDishes) {
+  const merged = new Map(currentCatalog.map((dish) => [dish.id, dish]));
+  nextDishes.forEach((dish) => {
+    merged.set(dish.id, dish);
+  });
+  return Array.from(merged.values());
 }
 
 function Badge({ children, tone = "olive" }) {
@@ -419,7 +282,7 @@ function DishListItem({ dish, saved, onToggle }) {
         <div className="dish-meta-line">
           <Badge tone="tomato">{dish.time} min</Badge>
           <Badge>{getDifficultyLabel(dish.time)}</Badge>
-          <span className="chip chip-primary">{CATEGORY_LABELS[DISH_CATEGORY_MAP[dish.id]]}</span>
+          <span className="chip chip-primary">{CATEGORY_LABELS[getDishCategory(dish)]}</span>
           <span className="chip">{formatCalories(estimateDishCalories(dish))} cal est.</span>
         </div>
         <p className="dish-sources">{dish.sources.join(" • ")}</p>
@@ -445,45 +308,65 @@ function App() {
   const [activeTab, setActiveTab] = useState(() => safeRead(STORAGE_KEYS.activeTab, "planner"));
   const [weekSelections, setWeekSelections] = useState(() => getSavedWeekSelections());
   const [triedDishes, setTriedDishes] = useState(() => safeRead(STORAGE_KEYS.triedDishes, []));
-  const [deckIds, setDeckIds] = useState(() => safeRead(STORAGE_KEYS.deckIds, buildDeck(getSavedWeekSelections(), safeRead(STORAGE_KEYS.triedDishes, []))));
+  const [dayDishSelections, setDayDishSelections] = useState(() => safeRead(STORAGE_KEYS.dayDishSelections, {}));
+  const [dishCatalog, setDishCatalog] = useState(() => safeRead(STORAGE_KEYS.dishCatalog, []));
+  const [deckIds, setDeckIds] = useState(() => safeRead(STORAGE_KEYS.deckIds, []));
   const [wishlistIds, setWishlistIds] = useState(() => safeRead(STORAGE_KEYS.wishlistIds, []));
   const [manualPantryItems, setManualPantryItems] = useState(() => safeRead(STORAGE_KEYS.manualPantryItems, []));
   const [pantryInventory, setPantryInventory] = useState(() => safeRead(STORAGE_KEYS.pantryInventory, []));
   const [archivedLists, setArchivedLists] = useState(() => safeRead(STORAGE_KEYS.archivedLists, []));
   const [pantryDraft, setPantryDraft] = useState({ name: "", note: "", status: "extra" });
+  const [fetchState, setFetchState] = useState({ error: "", biasKeywords: [], exportMessage: "" });
+  const [dayPicker, setDayPicker] = useState({
+    dayName: "",
+    category: "",
+    options: [],
+    loading: false,
+    error: "",
+  });
 
   const weekDays = getCurrentWeekDates();
   const selectedCategories = getSelectedCategories(weekSelections);
   const orderedSelectedCategories = getOrderedSelectedCategories(weekSelections);
-  const deck = deckIds.map((id) => DISH_LOOKUP[id]).filter(Boolean);
-  const wishlist = wishlistIds.map((id) => DISH_LOOKUP[id]).filter(Boolean);
-  const groupedDeck = [
-    ...orderedSelectedCategories,
-    ...CATEGORY_OPTIONS.map((option) => option.value).filter((category) => !orderedSelectedCategories.includes(category)),
-  ]
-    .filter((category, index, list) => list.indexOf(category) === index)
-    .map((category) => ({
-      category,
-      label: CATEGORY_LABELS[category],
-      dishes: deck.filter((dish) => DISH_CATEGORY_MAP[dish.id] === category),
-    }))
-    .filter((group) => group.dishes.length);
-  const currentShoppingPlan = wishlist.length ? createShoppingPlan(wishlist) : null;
-  const preferredSourceMix = useMemo(() => {
+  const dishLookup = useMemo(
+    () => Object.fromEntries(dishCatalog.map((dish) => [dish.id, dish])),
+    [dishCatalog],
+  );
+  const selectedDayEntries = weekDays
+    .map((day) => {
+      const dishId = dayDishSelections[day.key];
+      const dish = dishLookup[dishId];
+      const category = weekSelections[day.key];
+
+      if (!dishId || !dish || !category) {
+        return null;
+      }
+
+      return {
+        dayKey: day.key,
+        dayName: day.dayName,
+        shortDate: day.shortDate,
+        category,
+        dish,
+      };
+    })
+    .filter(Boolean);
+  const currentShoppingPlan = selectedDayEntries.length ? createShoppingPlan(selectedDayEntries.map((entry) => entry.dish)) : null;
+  const sourceMix = useMemo(() => {
     const counts = new Map();
 
-    deck.forEach((dish) => {
-      const source = getPrimaryRecipeSource(dish);
+    selectedDayEntries.forEach(({ dish }) => {
+      const source = dish.sources[0] || "Edamam";
       counts.set(source, (counts.get(source) || 0) + 1);
     });
 
-    return PREFERRED_RECIPE_SOURCES
-      .map((source) => ({ source, count: counts.get(source) || 0 }))
-      .filter((item) => item.count > 0);
-  }, [deck]);
-
+    return Array.from(counts.entries())
+      .sort((left, right) => right[1] - left[1])
+      .slice(0, 4)
+      .map(([source, count]) => ({ source, count }));
+  }, [selectedDayEntries]);
   const pantryInventoryLookup = useMemo(
-    () => new Map(pantryInventory.map((item) => [ingredientKey(item.ingredient, item.unit), item])),
+    () => new Map(pantryInventory.map((item) => [ingredientKey(item.ingredientId, item.ingredient, item.unit), item])),
     [pantryInventory],
   );
   const manualPantryLookup = useMemo(
@@ -497,7 +380,7 @@ function App() {
 
     return currentShoppingPlan.inventoryRows.map((inventoryRow, index) => {
       const displayRow = currentShoppingPlan.rows[index];
-      const pantryMatch = pantryInventoryLookup.get(ingredientKey(inventoryRow.ingredient, inventoryRow.unit));
+      const pantryMatch = pantryInventoryLookup.get(ingredientKey(inventoryRow.ingredientId, inventoryRow.ingredient, inventoryRow.unit));
       const manualMatch = manualPantryLookup.get(normalizeIngredient(inventoryRow.ingredient));
       const usageAmount = getEstimatedUsageAmount(inventoryRow);
       const pantryAmount = pantryMatch?.amount ?? 0;
@@ -535,6 +418,14 @@ function App() {
   }, [weekSelections]);
 
   useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.dayDishSelections, JSON.stringify(dayDishSelections));
+  }, [dayDishSelections]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.dishCatalog, JSON.stringify(dishCatalog));
+  }, [dishCatalog]);
+
+  useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.deckIds, JSON.stringify(deckIds));
   }, [deckIds]);
 
@@ -558,32 +449,112 @@ function App() {
     window.localStorage.setItem(STORAGE_KEYS.triedDishes, JSON.stringify(triedDishes));
   }, [triedDishes]);
 
-  function refreshDeck(nextSelections = weekSelections) {
-    setDeckIds(buildDeck(nextSelections, triedDishes));
+  useEffect(() => {
+    setWishlistIds((current) => current.filter((id) => dishLookup[id]));
+    setDeckIds((current) => current.filter((id) => dishLookup[id]));
+    setDayDishSelections((current) => Object.fromEntries(
+      Object.entries(current).filter(([, dishId]) => dishLookup[dishId]),
+    ));
+  }, [dishLookup]);
+
+  async function refreshDeck(nextSelections = weekSelections) {
+    const dayToRefresh = dayPicker.dayName && nextSelections[dayPicker.dayName]
+      ? dayPicker.dayName
+      : WEEKDAY_NAMES.find((day) => nextSelections[day]);
+
+    if (!dayToRefresh) {
+      setFetchState((current) => ({
+        ...current,
+        error: "Pick a dish type for at least one day before refreshing options.",
+      }));
+      return;
+    }
+
+    await openDayDishPicker(dayToRefresh, nextSelections[dayToRefresh]);
+  }
+
+  async function openDayDishPicker(dayName, category) {
+    if (!category) {
+      setDayPicker({ dayName: "", category: "", options: [], loading: false, error: "" });
+      return;
+    }
+
+    setDayPicker({
+      dayName,
+      category,
+      options: [],
+      loading: true,
+      error: "",
+    });
+    setFetchState((current) => ({ ...current, error: "", exportMessage: "" }));
+
+    try {
+      const result = await fetchEdamamRecipes({
+        categories: [category],
+        triedDishes,
+        limit: 50,
+      });
+
+      setDishCatalog((current) => mergeDishCatalog(current, result.dishes));
+      setDayPicker({
+        dayName,
+        category,
+        options: result.dishes.filter((dish) => getDishCategory(dish) === category),
+        loading: false,
+        error: "",
+      });
+      setFetchState((current) => ({
+        ...current,
+        biasKeywords: result.biasKeywords || current.biasKeywords,
+      }));
+    } catch (error) {
+      setDayPicker({
+        dayName,
+        category,
+        options: [],
+        loading: false,
+        error: error.message || "Unable to load day-specific dish options right now.",
+      });
+    }
   }
 
   function handleDaySelection(dayName, nextCategory) {
-    const nextSelections = { ...weekSelections, [dayName]: nextCategory };
-    setWeekSelections(nextSelections);
-    setDeckIds(buildDeck(nextSelections, triedDishes));
+    setWeekSelections((current) => ({ ...current, [dayName]: nextCategory }));
+    setDayDishSelections((current) => {
+      const next = { ...current };
+      delete next[dayName];
+      return next;
+    });
+    if (nextCategory) {
+      openDayDishPicker(dayName, nextCategory);
+    } else {
+      setDayPicker({ dayName: "", category: "", options: [], loading: false, error: "" });
+    }
   }
 
   function clearWeekSelections() {
-    const cleared = getDefaultWeekSelections();
-    setWeekSelections(cleared);
-    setDeckIds(buildDeck(cleared, triedDishes));
+    setWeekSelections(getDefaultWeekSelections());
+    setDayDishSelections({});
+    setDeckIds([]);
+    setDayPicker({ dayName: "", category: "", options: [], loading: false, error: "" });
   }
 
-  function toggleWishlist(dishId) {
-    setWishlistIds((current) => (
-      current.includes(dishId)
-        ? current.filter((id) => id !== dishId)
-        : [...current, dishId]
-    ));
+  function applyDayDishSelection(dayName, dish) {
+    setDishCatalog((current) => mergeDishCatalog(current, [dish]));
+    setDayDishSelections((current) => ({ ...current, [dayName]: dish.id }));
+    setDayPicker({ dayName: "", category: "", options: [], loading: false, error: "" });
   }
 
-  function handleGoShop() {
-    if (!wishlist.length || !currentShoppingPlan) {
+  function clearDayDishSelection(dayName) {
+    setDayDishSelections((current) => {
+      const next = { ...current };
+      delete next[dayName];
+      return next;
+    });
+  }
+
+  async function handleGoShop() {
+    if (!selectedDayEntries.length || !currentShoppingPlan) {
       return;
     }
 
@@ -592,29 +563,79 @@ function App() {
       return;
     }
 
+    const payload = buildGoogleSheetPayload(currentShoppingPlan, {
+      linkedSheetUrl: SHEET_URL,
+      sheetName: buildSheetName(weekDays),
+      weekLabel: `${weekDays[0].shortDate} - ${weekDays[6].shortDate}`,
+      generatedAt: new Date().toISOString(),
+      selectedDishes: selectedDayEntries.map(({ dayName, dish }) => ({
+        dayName,
+        name: dish.name,
+        category: getDishCategory(dish),
+        calories: estimateDishCalories(dish),
+      })),
+    });
+
+    let exportMessage = "Google Sheet export skipped because no Apps Script URL is configured.";
+
+    try {
+      const exportResult = await pushShoppingPlanToGoogleSheet(payload);
+      if (exportResult?.ok) {
+        exportMessage = `Google Sheet updated: ${payload.sheetName}`;
+      } else if (exportResult?.reason) {
+        exportMessage = exportResult.reason;
+      }
+    } catch (error) {
+      exportMessage = error.message || "Google Sheet export failed.";
+    }
+
     const archive = {
       id: `${Date.now()}`,
       createdAt: new Date().toISOString(),
       weekLabel: `${weekDays[0].shortDate} - ${weekDays[6].shortDate}`,
-      selectedDishIds: wishlist.map((dish) => dish.id),
+      selectedDishIds: selectedDayEntries.map(({ dish }) => dish.id),
+      selectedDishes: selectedDayEntries.map(({ dayName, shortDate, dish }) => ({
+        id: dish.id,
+        dayName,
+        shortDate,
+        name: dish.name,
+        category: getDishCategory(dish),
+        calories: estimateDishCalories(dish),
+        tags: [...(dish.tags || [])],
+        cuisines: [...(dish.cuisines || [])],
+        time: dish.time,
+      })),
       rows: pendingGroceryRows,
       inventoryRows: currentShoppingPlan.inventoryRows,
       recommendedStore: currentShoppingPlan.recommendedStore,
+      exportMessage,
     };
 
     setArchivedLists((current) => [archive, ...current]);
     setPantryInventory((current) => mergePantryAfterShop(current, currentShoppingPlan.inventoryRows));
     setTriedDishes((current) => [
-      ...wishlist.map((dish) => ({
-        id: `${archive.id}:${dish.id}`,
+      ...selectedDayEntries.map(({ dayName, dish }) => ({
+        id: `${archive.id}:${dayName}:${dish.id}`,
         archiveId: archive.id,
         dishId: dish.id,
         confirmedAt: archive.createdAt,
         rating: 0,
+        dishSnapshot: {
+          id: dish.id,
+          name: dish.name,
+          dayName,
+          category: getDishCategory(dish),
+          calories: estimateDishCalories(dish),
+          tags: [...(dish.tags || [])],
+          cuisines: [...(dish.cuisines || [])],
+          time: dish.time,
+        },
       })),
       ...current,
     ]);
+    setDayDishSelections({});
     setWishlistIds([]);
+    setFetchState((current) => ({ ...current, exportMessage }));
     setActiveTab("grocery-lists");
   }
 
@@ -641,13 +662,9 @@ function App() {
   }
 
   function updateDishRating(recordId, rating) {
-    setTriedDishes((current) => {
-      const next = current.map((record) => (
-        record.id === recordId ? { ...record, rating } : record
-      ));
-      setDeckIds(buildDeck(weekSelections, next));
-      return next;
-    });
+    setTriedDishes((current) => current.map((record) => (
+      record.id === recordId ? { ...record, rating } : record
+    )));
   }
 
   async function copyArchivePayload(archive) {
@@ -660,11 +677,11 @@ function App() {
         <div className="workflow-head">
           <div>
             <div className="eyebrow">Dish Radar</div>
-            <h1>Plan dishes, confirm shopping, and keep pantry leftovers until fully consumed.</h1>
+            <h1>Generate live recipes, confirm shopping, and keep pantry leftovers until fully consumed.</h1>
           </div>
           <div className="workflow-stats">
             <span>{selectedCategories.length} days planned</span>
-            <span>{wishlist.length} dishes saved</span>
+            <span>{selectedDayEntries.length} dishes assigned</span>
             <span>{archivedLists.length} grocery lists</span>
             <span>{pantryInventory.length} pantry leftovers</span>
           </div>
@@ -713,6 +730,29 @@ function App() {
                       </option>
                     ))}
                   </select>
+                  {weekSelections[day.key] ? (
+                    <div className="day-selection-block">
+                      <span className="chip chip-primary">{CATEGORY_LABELS[weekSelections[day.key]]}</span>
+                      {dayDishSelections[day.key] && dishLookup[dayDishSelections[day.key]] ? (
+                        <div className="day-picked-card">
+                          <strong>{dishLookup[dayDishSelections[day.key]].name}</strong>
+                          <p>{formatCalories(estimateDishCalories(dishLookup[dayDishSelections[day.key]]))} cal est. • {dishLookup[dayDishSelections[day.key]].time} min</p>
+                          <div className="mini-action-row">
+                            <button className="mini-button" onClick={() => openDayDishPicker(day.key, weekSelections[day.key])}>
+                              Change dish
+                            </button>
+                            <button className="mini-button" onClick={() => clearDayDishSelection(day.key)}>
+                              Clear
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button className="action-button wide" onClick={() => openDayDishPicker(day.key, weekSelections[day.key])}>
+                          Choose dish
+                        </button>
+                      )}
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>
@@ -722,20 +762,28 @@ function App() {
             <div className="control-block grow">
               <label>Planner status</label>
               <div className="summary-box">
-                <strong>{selectedCategories.length ? `${selectedCategories.length} days planned` : "No days locked yet"}</strong>
+                <strong>
+                  {dayPicker.loading
+                    ? `Loading 50 ${CATEGORY_LABELS[dayPicker.category] || ""} options for ${dayPicker.dayName}...`
+                    : selectedDayEntries.length
+                      ? `${selectedDayEntries.length} days have a chosen dish`
+                      : selectedCategories.length
+                        ? "Dish types chosen. Pick a recipe for each day."
+                        : "No days locked yet"}
+                </strong>
                 <span>
-                  {triedDishes.some((record) => record.rating >= 4)
-                    ? "Recommendations are being biased toward dishes that match your highest-rated meals."
-                    : "Rate dishes in Tried Dishes to bias future recommendations."}
+                  {fetchState.biasKeywords.length
+                    ? `Next fetch is being biased toward: ${fetchState.biasKeywords.join(", ")}.`
+                    : "When you rate dishes in Tried Dishes, future day-pickers bias toward similar cuisines and flavors."}
                 </span>
               </div>
             </div>
             <div className="button-row">
-              <button className="action-button" onClick={() => refreshDeck()}>
-                Generate dishes
+              <button className="action-button" onClick={() => refreshDeck()} disabled={dayPicker.loading}>
+                {dayPicker.loading ? "Refreshing..." : "Refresh inspiration"}
               </button>
-              <button className="ghost-button" onClick={() => refreshDeck()}>
-                Refresh ideas
+              <button className="ghost-button" onClick={() => setDayDishSelections({})}>
+                Clear chosen dishes
               </button>
             </div>
           </div>
@@ -743,44 +791,44 @@ function App() {
           <div className="info-strip">
             <p>
               {selectedCategories.length
-                ? `Current dish groups follow your selected meal types: ${[...new Set(selectedCategories)].map((category) => CATEGORY_LABELS[category]).join(", ")}.`
-                : "Choose one or more meal types above, or leave the week blank to browse everything fun."}
+                ? "Selecting a dish type now automatically opens a 50-option picker for that day."
+                : "Choose one or more meal types above to start building your week day by day."}
             </p>
             <p>
-              {preferredSourceMix.length
-                ? `Source mix is now biased toward large recipe libraries: ${preferredSourceMix.map((item) => `${item.source} (${item.count})`).join(", ")}.`
-                : `Dish generation is now rotating more ideas from ${PREFERRED_RECIPE_SOURCES.join(", ")} for broader variety.`}
+              {sourceMix.length
+                ? `Current chosen dishes come from: ${sourceMix.map((item) => `${item.source} (${item.count})`).join(", ")}.`
+                : "Day pickers use live Edamam recipe results instead of the old local dish array."}
             </p>
+            {fetchState.error ? <p>{fetchState.error}</p> : null}
           </div>
 
           <section className="dish-list-panel">
             <div className="panel-head">
               <div>
-                <div className="eyebrow">Dish ideas</div>
-                <h2>Potential dishes for the selected week</h2>
+                <div className="eyebrow">Selected dishes</div>
+                <h2>See each day’s chosen recipe at a glance</h2>
               </div>
             </div>
 
-            <div className="dish-groups">
-              {groupedDeck.map((group) => (
-                <section key={group.category} className="dish-group">
-                  <div className="dish-group-head">
-                    <h3>{group.label}</h3>
-                    <span>{group.dishes.length} ideas</span>
+            {selectedDayEntries.length ? (
+              <div className="wishlist-list">
+                {selectedDayEntries.map((entry) => (
+                  <div key={`${entry.dayKey}-${entry.dish.id}`} className="wishlist-item">
+                    <div>
+                      <strong>{entry.dayName}: {entry.dish.name}</strong>
+                      <p>{CATEGORY_LABELS[entry.category]} • {formatCalories(estimateDishCalories(entry.dish))} cal est. • {entry.dish.time} min</p>
+                    </div>
+                    <button className="mini-button" onClick={() => openDayDishPicker(entry.dayKey, entry.category)}>
+                      Swap
+                    </button>
                   </div>
-                  <ul className="dish-list">
-                    {group.dishes.map((dish) => (
-                      <DishListItem
-                        key={dish.id}
-                        dish={dish}
-                        saved={wishlistIds.includes(dish.id)}
-                        onToggle={toggleWishlist}
-                      />
-                    ))}
-                  </ul>
-                </section>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-copy">
+                Pick a meal type for a day, then choose one recipe from the 50 live options shown for that day.
+              </p>
+            )}
           </section>
         </section>
 
@@ -788,31 +836,31 @@ function App() {
           <section className="panel sticky-panel">
             <div className="panel-head">
               <div>
-                <div className="eyebrow">Wishlist</div>
-                <h2>This week’s picks</h2>
+                <div className="eyebrow">Week at a glance</div>
+                <h2>Dishes assigned to each day</h2>
               </div>
-              <button className="text-button" onClick={() => setWishlistIds([])}>
+              <button className="text-button" onClick={() => setDayDishSelections({})}>
                 Clear
               </button>
             </div>
 
-            {wishlist.length ? (
+            {selectedDayEntries.length ? (
               <div className="wishlist-list">
-                {wishlist.map((dish) => (
-                  <div key={dish.id} className="wishlist-item">
+                {selectedDayEntries.map((entry) => (
+                  <div key={`${entry.dayKey}-summary`} className="wishlist-item">
                     <div>
-                      <strong>{dish.name}</strong>
-                      <p>{CATEGORY_LABELS[DISH_CATEGORY_MAP[dish.id]]} • {formatCalories(estimateDishCalories(dish))} cal est.</p>
+                      <strong>{entry.dayName}</strong>
+                      <p>{entry.dish.name}</p>
                     </div>
-                    <button className="mini-button" onClick={() => toggleWishlist(dish.id)}>
-                      Remove
+                    <button className="mini-button" onClick={() => openDayDishPicker(entry.dayKey, entry.category)}>
+                      Edit
                     </button>
                   </div>
                 ))}
               </div>
             ) : (
               <p className="empty-copy">
-                Save dishes from the list, then switch to <strong>Grocery List</strong> to confirm the shopping run.
+                Choose a dish for each day and they’ll appear here automatically.
               </p>
             )}
           </section>
@@ -829,7 +877,7 @@ function App() {
             <div className="panel-head">
               <div>
                 <div className="eyebrow">Current grocery list</div>
-                <h2>Upcoming shopping run for the active wishlist</h2>
+                <h2>Upcoming shopping run for the selected week</h2>
               </div>
               {currentShoppingPlan ? <strong>{formatCurrency(currentShoppingPlan.recommendedStore.estimatedTotal)}</strong> : null}
             </div>
@@ -853,7 +901,7 @@ function App() {
 
                 <p className="summary-copy">{currentShoppingPlan.recommendedStore.reason}</p>
                 <p className="summary-copy subtle">
-                  Click <strong>GO SHOP</strong> to confirm this week, archive the list, and update pantry leftovers.
+                  Click <strong>GO SHOP</strong> to export this list to your Google Sheet and update pantry leftovers.
                 </p>
 
                 <div className="table-wrap">
@@ -869,7 +917,7 @@ function App() {
                     </thead>
                     <tbody>
                       {pendingGroceryRows.map((row) => (
-                        <tr key={`${row.ingredient}-${row.qty}`}>
+                        <tr key={`${row.ingredientId || row.ingredient}-${row.qty}`}>
                           <td>{row.ingredient}</td>
                           <td>{row.qty}</td>
                           <td>{formatCurrency(row.expectedPrice)}</td>
@@ -891,10 +939,12 @@ function App() {
                     GO SHOP
                   </button>
                 </div>
+
+                {fetchState.exportMessage ? <p className="summary-copy subtle">{fetchState.exportMessage}</p> : null}
               </>
             ) : (
               <p className="empty-copy">
-                Add dishes in <strong>Dish Planner</strong> and the grocery list will appear here. If pantry still has an ingredient from a previous week, it will be flagged here before you shop.
+                Pick dishes for one or more days in <strong>Dish Planner</strong> and the grocery list will appear here. If pantry still has an ingredient from a previous week, it will be flagged here before you shop.
               </p>
             )}
           </section>
@@ -927,7 +977,7 @@ function App() {
                   </thead>
                   <tbody>
                     {pantryInventory.map((item) => (
-                      <tr key={`${item.ingredient}-${item.unit}`}>
+                      <tr key={ingredientKey(item.ingredientId, item.ingredient, item.unit)}>
                         <td>{item.ingredient}</td>
                         <td>{formatAmount(item.amount)}</td>
                         <td>{item.unit}</td>
@@ -1037,7 +1087,7 @@ function App() {
                         <p>{new Date(archive.createdAt).toLocaleString("en-US")}</p>
                       </div>
                       <div className="archive-actions">
-                        <span>{archive.selectedDishIds.length} dishes</span>
+                        <span>{(archive.selectedDishes || []).length} dishes</span>
                         <button className="mini-button" onClick={() => copyArchivePayload(archive)}>
                           Copy JSON
                         </button>
@@ -1050,19 +1100,18 @@ function App() {
                     </div>
 
                     <div className="archive-dishes">
-                      {archive.selectedDishIds.map((dishId) => {
-                        const dish = DISH_LOOKUP[dishId];
-                        return dish ? (
-                          <div key={dishId} className="archive-dish-row">
-                            <div>
-                              <strong>{dish.name}</strong>
-                              <p>{CATEGORY_LABELS[DISH_CATEGORY_MAP[dish.id]]}</p>
-                            </div>
-                            <span className="chip">{formatCalories(estimateDishCalories(dish))} cal est.</span>
+                      {(archive.selectedDishes || []).map((snapshot) => (
+                        <div key={`${snapshot.dayName || "day"}-${snapshot.id}`} className="archive-dish-row">
+                          <div>
+                            <strong>{snapshot.dayName ? `${snapshot.dayName}: ${snapshot.name}` : snapshot.name}</strong>
+                            <p>{CATEGORY_LABELS[snapshot.category]}</p>
                           </div>
-                        ) : null;
-                      })}
+                          <span className="chip">{formatCalories(snapshot.calories)} cal est.</span>
+                        </div>
+                      ))}
                     </div>
+
+                    {archive.exportMessage ? <p className="summary-copy subtle">{archive.exportMessage}</p> : null}
                   </article>
                 ))}
               </div>
@@ -1096,7 +1145,7 @@ function App() {
             {sortedRecords.length ? (
               <div className="archive-list">
                 {sortedRecords.map((record) => {
-                  const dish = DISH_LOOKUP[record.dishId];
+                  const dish = dishLookup[record.dishId] || record.dishSnapshot;
                   const archive = archivedLists.find((entry) => entry.id === record.archiveId);
 
                   if (!dish) {
@@ -1108,9 +1157,9 @@ function App() {
                       <div className="archive-head">
                         <div>
                           <strong>{dish.name}</strong>
-                          <p>{archive?.weekLabel || "Confirmed shopping week"} • {CATEGORY_LABELS[DISH_CATEGORY_MAP[dish.id]]}</p>
+                          <p>{record.dishSnapshot?.dayName ? `${record.dishSnapshot.dayName} • ` : ""}{archive?.weekLabel || "Confirmed shopping week"} • {CATEGORY_LABELS[getDishCategory(dish)]}</p>
                         </div>
-                        <span className="chip">{formatCalories(estimateDishCalories(dish))} cal est.</span>
+                        <span className="chip">{formatCalories(dish.calories || estimateDishCalories(dish))} cal est.</span>
                       </div>
 
                       <div className="rating-row">
@@ -1138,6 +1187,50 @@ function App() {
     );
   }
 
+  function renderDayPickerModal() {
+    if (!dayPicker.dayName) {
+      return null;
+    }
+
+    return (
+      <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Choose a dish for the selected day">
+        <div className="modal-card">
+          <div className="panel-head">
+            <div>
+              <div className="eyebrow">Choose a dish</div>
+              <h2>{dayPicker.dayName}: {CATEGORY_LABELS[dayPicker.category]}</h2>
+            </div>
+            <button
+              className="text-button"
+              onClick={() => setDayPicker({ dayName: "", category: "", options: [], loading: false, error: "" })}
+            >
+              Close
+            </button>
+          </div>
+
+          {dayPicker.loading ? <p className="empty-copy">Loading 50 live options for this day...</p> : null}
+          {dayPicker.error ? <p className="empty-copy">{dayPicker.error}</p> : null}
+
+          {!dayPicker.loading && !dayPicker.error ? (
+            <div className="modal-option-list">
+              {dayPicker.options.slice(0, 50).map((dish) => (
+                <div key={`${dayPicker.dayName}-${dish.id}`} className="modal-option-card">
+                  <div>
+                    <strong>{dish.name}</strong>
+                    <p>{formatCalories(estimateDishCalories(dish))} cal est. • {dish.time} min • {dish.sources[0] || "Edamam"}</p>
+                  </div>
+                  <button className="action-button" onClick={() => applyDayDishSelection(dayPicker.dayName, dish)}>
+                    Select
+                  </button>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page-shell">
       {renderCompactOverview()}
@@ -1159,6 +1252,7 @@ function App() {
       {activeTab === "pantry" ? renderPantryTab() : null}
       {activeTab === "grocery-lists" ? renderArchivedListsTab() : null}
       {activeTab === "tried" ? renderTriedDishesTab() : null}
+      {renderDayPickerModal()}
     </div>
   );
 }
