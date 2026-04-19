@@ -1,4 +1,5 @@
 import { ARCHIVE_DISH_POOL } from "./archiveDishPool";
+import { EXPANDED_ARCHIVE_DISH_POOL } from "./expandedArchiveDishPool";
 import { DISH_POOL } from "./mockDishPool";
 import { buildRecipeMatrixDishes } from "./recipeMatrix";
 
@@ -264,6 +265,7 @@ const CATEGORY_UNIT_CALORIES = {
 };
 
 const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1Tk4ny0z2fEUUquuvBwBpLQMhTt9BsGpep69l0RmvxmE/edit?gid=0#gid=0";
+export const INGREDIENT_LIBRARY_UPDATED_AT = "2026-04-19";
 
 const DEFAULT_BASE_PRICES = {
   bakery: 4.2,
@@ -396,7 +398,7 @@ function normalizeLocalDish(dish) {
 }
 
 function buildLocalDishLibrary(triedDishes) {
-  const basePool = [...DISH_POOL, ...ARCHIVE_DISH_POOL].map(normalizeLocalDish);
+  const basePool = [...DISH_POOL, ...ARCHIVE_DISH_POOL, ...EXPANDED_ARCHIVE_DISH_POOL].map(normalizeLocalDish);
   const matrixPool = buildRecipeMatrixDishes(basePool, triedDishes, (dish) => dish.category).map(normalizeLocalDish);
   const merged = new Map();
 
@@ -405,6 +407,10 @@ function buildLocalDishLibrary(triedDishes) {
   });
 
   return Array.from(merged.values());
+}
+
+export function getDishLibrarySnapshot(triedDishes = []) {
+  return buildLocalDishLibrary(triedDishes);
 }
 
 function scoreDishAgainstPreferences(dish, biasKeywords) {

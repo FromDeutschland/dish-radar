@@ -6,6 +6,8 @@ import {
   fetchDishOptions,
   formatCalories,
   formatCurrency,
+  getDishLibrarySnapshot,
+  INGREDIENT_LIBRARY_UPDATED_AT,
   pushShoppingPlanToGoogleSheet,
 } from "./storeLogic";
 
@@ -17,6 +19,7 @@ const STORAGE_KEYS = {
   dishCatalog: "dish-radar.dish-catalog",
   manualPantryItems: "dish-radar.manual-pantry-items",
   pantryInventory: "dish-radar.pantry-inventory",
+  ratingHistory: "dish-radar.rating-history",
   triedDishes: "dish-radar.tried-dishes",
   weekSelections: "dish-radar.week-selections",
   wishlistIds: "dish-radar.wishlist-ids",
@@ -27,7 +30,7 @@ const TABS = [
   { value: "groceries", label: "Grocery List" },
   { value: "pantry", label: "Pantry" },
   { value: "grocery-lists", label: "Grocery Lists" },
-  { value: "tried", label: "Tried Dishes" },
+  { value: "analytics", label: "Analytics" },
 ];
 
 const WEEKDAY_NAMES = [
@@ -59,8 +62,8 @@ const WORKFLOW_STEPS = [
   "1. Pick meal types for the week.",
   "2. Choose a dish type for a day.",
   "3. Pick that day’s dish from 50 matching options.",
-  "4. Review the Grocery List tab.",
-  "5. Click Go Shop to export the final list and update pantry leftovers.",
+  "4. Tap Ready to shop to review what was actually made last week.",
+  "5. Open Grocery List and confirm Go Shop to update pantry leftovers and export the list.",
 ];
 
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1Tk4ny0z2fEUUquuvBwBpLQMhTt9BsGpep69l0RmvxmE/edit?gid=0#gid=0";
@@ -91,6 +94,19 @@ function roundAmount(value) {
 
 function formatAmount(value) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function getSavedActiveTab() {
+  const saved = safeRead(STORAGE_KEYS.activeTab, "planner");
+  return saved === "tried" ? "analytics" : saved;
+}
+
+function buildReviewDraft(records) {
+  return records.map((record) => ({
+    id: record.id,
+    made: true,
+    rating: record.rating || 0,
+  }));
 }
 
 function getDefaultWeekSelections() {
@@ -305,9 +321,10 @@ function RatingButton({ active, value, onClick }) {
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState(() => safeRead(STORAGE_KEYS.activeTab, "planner"));
+  const [activeTab, setActiveTab] = useState(() => getSavedActiveTab());
   const [weekSelections, setWeekSelections] = useState(() => getSavedWeekSelections());
   const [triedDishes, setTriedDishes] = useState(() => safeRead(STORAGE_KEYS.triedDishes, []));
+  const [ratingHistory, setRatingHistory] = useState(() => safeRead(STORAGE_KEYS.ratingHistory, []));
   const [dayDishSelections, setDayDishSelections] = useState(() => safeRead(STORAGE_KEYS.dayDishSelections, {}));
   const [dishCatalog, setDishCatalog] = useState(() => safeRead(STORAGE_KEYS.dishCatalog, []));
   const [deckIds, setDeckIds] = useState(() => safeRead(STORAGE_KEYS.deckIds, []));
@@ -316,7 +333,10 @@ function App() {
   const [pantryInventory, setPantryInventory] = useState(() => safeRead(STORAGE_KEYS.pantryInventory, []));
   const [archivedLists, setArchivedLists] = useState(() => safeRead(STORAGE_KEYS.archivedLists, []));
   const [pantryDraft, setPantryDraft] = useState({ name: "", note: "", status: "extra" });
+  const [pantryStockDraft, setPantryStockDraft] = useState({ ingredient: "", amount: "1", unit: "jar", category: "pantry" });
   const [fetchState, setFetchState] = useState({ error: "", biasKeywords: [], exportMessage: "" });
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [reviewModal, setReviewModal] = useState({ open: false, records: [] });
   const [dayPicker, setDayPicker] = useState({
     dayName: "",
     category: "",
@@ -365,6 +385,7 @@ function App() {
       .slice(0, 4)
       .map(([source, count]) => ({ source, count }));
   }, [selectedDayEntries]);
+  const dishLibrary = useMemo(() => getDishLibrarySnapshot(ratingHistory), [ratingHistory]);
   const pantryInventoryLookup = useMemo(
     () => new Map(pantryInventory.map((item) => [ingredientKey(item.ingredientId, item.ingredient, item.unit), item])),
     [pantryInventory],
@@ -408,6 +429,60 @@ function App() {
       };
     });
   }, [currentShoppingPlan, manualPantryLookup, pantryInventoryLookup]);
+  const analytics = useMemo(() => {
+    const ratedRecords = ratingHistory.filter((record) => record.made && record.rating > 0);
+    const archivedSpend = archivedLists.reduce((total, archive) => total + (archive.recommendedStore?.estimatedTotal || 0), 0);
+    const storeCounts = archivedLists.reduce((counts, archive) => {
+      const storeName = archive.recommendedStore?.name;
+      if (storeName) {
+        counts[storeName] = (counts[storeName] || 0) + 1;
+      }
+      return counts;
+    }, {});
+    const favoriteDishCounts = ratedRecords.reduce((counts, record) => {
+      const key = record.dishSnapshot?.name || "Unknown dish";
+      const current = counts.get(key) || { total: 0, count: 0 };
+      current.total += record.rating;
+      current.count += 1;
+      counts.set(key, current);
+      return counts;
+    }, new Map());
+    const topDishes = Array.from(favoriteDishCounts.entries())
+      .map(([name, value]) => ({
+        name,
+        average: value.total / value.count,
+        count: value.count,
+      }))
+      .sort((left, right) => right.average - left.average || right.count - left.count)
+      .slice(0, 5);
+    const uniqueIngredients = new Set(
+      dishLibrary.flatMap((dish) => (dish.ingredients || []).map((ingredient) => normalizeIngredient(ingredient.name))),
+    );
+    const lastArchive = archivedLists[0];
+
+    return {
+      weeksShopped: archivedLists.length,
+      dishesPlanned: archivedLists.reduce((total, archive) => total + (archive.selectedDishes || []).length, 0),
+      dishesRated: ratedRecords.length,
+      averageRating: ratedRecords.length
+        ? ratedRecords.reduce((total, record) => total + record.rating, 0) / ratedRecords.length
+        : 0,
+      totalSpend: archivedSpend,
+      averageWeeklySpend: archivedLists.length ? archivedSpend / archivedLists.length : 0,
+      lastWeeklySpend: lastArchive?.recommendedStore?.estimatedTotal || 0,
+      topStore: Object.entries(storeCounts).sort((left, right) => right[1] - left[1])[0]?.[0] || "None yet",
+      pendingReviews: triedDishes.length,
+      pantryLines: pantryInventory.length + manualPantryItems.length,
+      totalLibraryDishes: dishLibrary.length,
+      totalLibraryIngredients: uniqueIngredients.size,
+      lastIngredientUpdate: INGREDIENT_LIBRARY_UPDATED_AT,
+      topDishes,
+      recentRatings: ratedRecords
+        .slice()
+        .sort((left, right) => new Date(right.confirmedAt).getTime() - new Date(left.confirmedAt).getTime())
+        .slice(0, 6),
+    };
+  }, [archivedLists, dishLibrary, manualPantryItems.length, pantryInventory.length, ratingHistory, triedDishes.length]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.activeTab, JSON.stringify(activeTab));
@@ -448,6 +523,10 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.triedDishes, JSON.stringify(triedDishes));
   }, [triedDishes]);
+
+  useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.ratingHistory, JSON.stringify(ratingHistory));
+  }, [ratingHistory]);
 
   useEffect(() => {
     setWishlistIds((current) => current.filter((id) => dishLookup[id]));
@@ -491,7 +570,7 @@ function App() {
     try {
       const result = await fetchDishOptions({
         categories: [category],
-        triedDishes,
+        triedDishes: ratingHistory,
         limit: 50,
       });
 
@@ -661,38 +740,122 @@ function App() {
     setManualPantryItems((current) => current.filter((item) => item.id !== itemId));
   }
 
-  function updateDishRating(recordId, rating) {
-    setTriedDishes((current) => current.map((record) => (
-      record.id === recordId ? { ...record, rating } : record
-    )));
+  function addPantryStock(event) {
+    event.preventDefault();
+
+    const ingredient = pantryStockDraft.ingredient.trim();
+    const amount = Number.parseFloat(pantryStockDraft.amount);
+
+    if (!ingredient || !Number.isFinite(amount) || amount <= 0) {
+      return;
+    }
+
+    const unit = pantryStockDraft.unit.trim() || "jar";
+    const key = ingredientKey("", ingredient, unit);
+
+    setPantryInventory((current) => {
+      const existingIndex = current.findIndex((item) => ingredientKey(item.ingredientId, item.ingredient, item.unit) === key);
+
+      if (existingIndex < 0) {
+        return [
+          {
+            ingredientId: "",
+            ingredient,
+            amount,
+            unit,
+            category: pantryStockDraft.category || "pantry",
+          },
+          ...current,
+        ];
+      }
+
+      return current.map((item, index) => (
+        index === existingIndex
+          ? { ...item, amount: roundAmount(item.amount + amount), category: pantryStockDraft.category || item.category }
+          : item
+      ));
+    });
+
+    setPantryStockDraft({ ingredient: "", amount: "1", unit: "jar", category: "pantry" });
+  }
+
+  function updatePantryInventoryItem(itemKey, field, value) {
+    setPantryInventory((current) => current.map((item) => {
+      const currentKey = ingredientKey(item.ingredientId, item.ingredient, item.unit);
+
+      if (currentKey !== itemKey) {
+        return item;
+      }
+
+      if (field === "amount") {
+        const amount = Number.parseFloat(value);
+        return {
+          ...item,
+          amount: Number.isFinite(amount) && amount > 0 ? amount : item.amount,
+        };
+      }
+
+      return {
+        ...item,
+        [field]: value,
+      };
+    }));
+  }
+
+  function removePantryInventoryItem(itemKey) {
+    setPantryInventory((current) => current.filter((item) => ingredientKey(item.ingredientId, item.ingredient, item.unit) !== itemKey));
+  }
+
+  function openReadyToShop() {
+    if (!selectedDayEntries.length) {
+      return;
+    }
+
+    if (triedDishes.length) {
+      setReviewModal({
+        open: true,
+        records: buildReviewDraft(triedDishes),
+      });
+      return;
+    }
+
+    setActiveTab("groceries");
+  }
+
+  function closeReviewModal() {
+    setReviewModal({ open: false, records: [] });
+  }
+
+  function updateReviewModalRecord(recordId, nextFields) {
+    setReviewModal((current) => ({
+      ...current,
+      records: current.records.map((record) => (
+        record.id === recordId ? { ...record, ...nextFields } : record
+      )),
+    }));
+  }
+
+  function submitWeeklyReview() {
+    const draftLookup = new Map(reviewModal.records.map((record) => [record.id, record]));
+    const reviewedRecords = triedDishes.map((record) => {
+      const draft = draftLookup.get(record.id) || { made: false, rating: 0 };
+
+      return {
+        ...record,
+        made: draft.made,
+        rating: draft.made ? draft.rating : 0,
+        reviewedAt: new Date().toISOString(),
+      };
+    });
+
+    setRatingHistory((current) => [...reviewedRecords, ...current]);
+    setTriedDishes([]);
+    closeReviewModal();
+    setActiveTab("groceries");
   }
 
   async function copyArchivePayload(archive) {
     await copyText(JSON.stringify(archive, null, 2));
-  }
-
-  function renderCompactOverview() {
-    return (
-      <header className="workflow-panel">
-        <div className="workflow-head">
-            <div>
-              <div className="eyebrow">Dish Radar</div>
-            <h1>Plan dishes from the built-in recipe library, confirm shopping, and keep pantry leftovers until fully consumed.</h1>
-          </div>
-          <div className="workflow-stats">
-            <span>{selectedCategories.length} days planned</span>
-            <span>{selectedDayEntries.length} dishes assigned</span>
-            <span>{archivedLists.length} grocery lists</span>
-            <span>{pantryInventory.length} pantry leftovers</span>
-          </div>
-        </div>
-        <ol className="workflow-list">
-          {WORKFLOW_STEPS.map((step) => (
-            <li key={step}>{step}</li>
-          ))}
-        </ol>
-      </header>
-    );
   }
 
   function renderPlannerTab() {
@@ -774,7 +937,7 @@ function App() {
                 <span>
                   {fetchState.biasKeywords.length
                     ? `Next fetch is being biased toward: ${fetchState.biasKeywords.join(", ")}.`
-                    : "When you rate dishes in Tried Dishes, future day-pickers bias toward similar cuisines and flavors."}
+                    : "Ratings from your weekly review shape future dish options toward similar cuisines and flavors."}
                 </span>
               </div>
             </div>
@@ -829,6 +992,11 @@ function App() {
                 Pick a meal type for a day, then choose one recipe from the 50 matching options shown for that day.
               </p>
             )}
+
+            <button className="hero-shop-button" onClick={openReadyToShop} disabled={!selectedDayEntries.length}>
+              <span>Ready to shop</span>
+              <small>{triedDishes.length ? "Review last week first, then open the grocery list." : "Open this week’s grocery list and shop."}</small>
+            </button>
           </section>
         </section>
 
@@ -961,9 +1129,67 @@ function App() {
             <div className="panel-head">
               <div>
                 <div className="eyebrow">Pantry leftovers</div>
-                <h2>Stored until fully consumed</h2>
+                <h2>Stored until fully consumed and always editable</h2>
               </div>
             </div>
+
+            <p className="empty-copy">
+              Pantry leftovers appear here after you confirm <strong>GO SHOP</strong>. You can still add, adjust, or delete pantry items at any time.
+            </p>
+
+            <form className="pantry-form pantry-stock-form" onSubmit={addPantryStock}>
+              <div className="control-block">
+                <label htmlFor="stock-ingredient">Add ingredient</label>
+                <input
+                  id="stock-ingredient"
+                  type="text"
+                  placeholder="Peanut butter"
+                  value={pantryStockDraft.ingredient}
+                  onChange={(event) => setPantryStockDraft((current) => ({ ...current, ingredient: event.target.value }))}
+                />
+              </div>
+              <div className="control-block">
+                <label htmlFor="stock-amount">Amount</label>
+                <input
+                  id="stock-amount"
+                  type="number"
+                  min="0.1"
+                  step="0.1"
+                  value={pantryStockDraft.amount}
+                  onChange={(event) => setPantryStockDraft((current) => ({ ...current, amount: event.target.value }))}
+                />
+              </div>
+              <div className="control-block">
+                <label htmlFor="stock-unit">Unit</label>
+                <input
+                  id="stock-unit"
+                  type="text"
+                  placeholder="jar"
+                  value={pantryStockDraft.unit}
+                  onChange={(event) => setPantryStockDraft((current) => ({ ...current, unit: event.target.value }))}
+                />
+              </div>
+              <div className="control-block">
+                <label htmlFor="stock-category">Category</label>
+                <select
+                  id="stock-category"
+                  value={pantryStockDraft.category}
+                  onChange={(event) => setPantryStockDraft((current) => ({ ...current, category: event.target.value }))}
+                >
+                  <option value="pantry">Pantry</option>
+                  <option value="specialty">Specialty</option>
+                  <option value="dairy">Dairy</option>
+                  <option value="produce">Produce</option>
+                  <option value="protein">Protein</option>
+                  <option value="seafood">Seafood</option>
+                  <option value="bakery">Bakery</option>
+                  <option value="frozen">Frozen</option>
+                </select>
+              </div>
+              <button className="action-button" type="submit">
+                Add stock
+              </button>
+            </form>
 
             {pantryInventory.length ? (
               <div className="table-wrap">
@@ -971,24 +1197,74 @@ function App() {
                   <thead>
                     <tr>
                       <th>Ingredient</th>
-                      <th>Remaining</th>
+                      <th>Amount</th>
                       <th>Unit</th>
+                      <th>Category</th>
+                      <th>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {pantryInventory.map((item) => (
-                      <tr key={ingredientKey(item.ingredientId, item.ingredient, item.unit)}>
-                        <td>{item.ingredient}</td>
-                        <td>{formatAmount(item.amount)}</td>
-                        <td>{item.unit}</td>
-                      </tr>
-                    ))}
+                    {pantryInventory.map((item) => {
+                      const itemKey = ingredientKey(item.ingredientId, item.ingredient, item.unit);
+
+                      return (
+                        <tr key={`${itemKey}-editable`}>
+                          <td>
+                            <input
+                              className="table-input"
+                              type="text"
+                              value={item.ingredient}
+                              onChange={(event) => updatePantryInventoryItem(itemKey, "ingredient", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="table-input"
+                              type="number"
+                              min="0.1"
+                              step="0.1"
+                              value={item.amount}
+                              onChange={(event) => updatePantryInventoryItem(itemKey, "amount", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <input
+                              className="table-input"
+                              type="text"
+                              value={item.unit}
+                              onChange={(event) => updatePantryInventoryItem(itemKey, "unit", event.target.value)}
+                            />
+                          </td>
+                          <td>
+                            <select
+                              className="table-input"
+                              value={item.category}
+                              onChange={(event) => updatePantryInventoryItem(itemKey, "category", event.target.value)}
+                            >
+                              <option value="pantry">Pantry</option>
+                              <option value="specialty">Specialty</option>
+                              <option value="dairy">Dairy</option>
+                              <option value="produce">Produce</option>
+                              <option value="protein">Protein</option>
+                              <option value="seafood">Seafood</option>
+                              <option value="bakery">Bakery</option>
+                              <option value="frozen">Frozen</option>
+                            </select>
+                          </td>
+                          <td>
+                            <button className="mini-button" onClick={() => removePantryInventoryItem(itemKey)}>
+                              Delete
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             ) : (
               <p className="empty-copy">
-                Pantry leftovers appear here after you confirm <strong>GO SHOP</strong>. Ingredients stay stored until future weeks consume them.
+                No pantry stock tracked yet. Add a pantry item above or confirm a shopping run to start carrying leftovers forward.
               </p>
             )}
           </section>
@@ -1126,59 +1402,116 @@ function App() {
     );
   }
 
-  function renderTriedDishesTab() {
-    const sortedRecords = [...triedDishes].sort((left, right) => (
-      new Date(right.confirmedAt).getTime() - new Date(left.confirmedAt).getTime()
-    ));
-
+  function renderAnalyticsTab() {
     return (
       <div className="workspace single-column-layout">
         <section className="main-column">
           <section className="panel">
             <div className="panel-head">
               <div>
-                <div className="eyebrow">Tried dishes</div>
-                <h2>Rate completed dishes to influence future recommendations</h2>
+                <div className="eyebrow">Analytics</div>
+                <h2>Track usage, ratings, costs, and library coverage</h2>
               </div>
             </div>
 
-            {sortedRecords.length ? (
-              <div className="archive-list">
-                {sortedRecords.map((record) => {
-                  const dish = dishLookup[record.dishId] || record.dishSnapshot;
-                  const archive = archivedLists.find((entry) => entry.id === record.archiveId);
+            <div className="analytics-grid">
+              <article className="stat-card">
+                <span>Total shopping weeks</span>
+                <strong>{analytics.weeksShopped}</strong>
+              </article>
+              <article className="stat-card">
+                <span>Dishes planned</span>
+                <strong>{analytics.dishesPlanned}</strong>
+              </article>
+              <article className="stat-card">
+                <span>Dishes rated</span>
+                <strong>{analytics.dishesRated}</strong>
+              </article>
+              <article className="stat-card">
+                <span>Average rating</span>
+                <strong>{analytics.averageRating ? analytics.averageRating.toFixed(1) : "0.0"}/5</strong>
+              </article>
+              <article className="stat-card">
+                <span>Total grocery spend</span>
+                <strong>{formatCurrency(analytics.totalSpend)}</strong>
+              </article>
+              <article className="stat-card">
+                <span>Average weekly spend</span>
+                <strong>{formatCurrency(analytics.averageWeeklySpend)}</strong>
+              </article>
+              <article className="stat-card">
+                <span>Most-used store</span>
+                <strong>{analytics.topStore}</strong>
+              </article>
+              <article className="stat-card">
+                <span>Pantry lines tracked</span>
+                <strong>{analytics.pantryLines}</strong>
+              </article>
+              <article className="stat-card">
+                <span>Total dish library</span>
+                <strong>{analytics.totalLibraryDishes}</strong>
+              </article>
+              <article className="stat-card">
+                <span>Unique ingredients</span>
+                <strong>{analytics.totalLibraryIngredients}</strong>
+              </article>
+              <article className="stat-card">
+                <span>Ingredient inputs updated</span>
+                <strong>{analytics.lastIngredientUpdate}</strong>
+              </article>
+              <article className="stat-card">
+                <span>Pending weekly reviews</span>
+                <strong>{analytics.pendingReviews}</strong>
+              </article>
+            </div>
 
-                  if (!dish) {
-                    return null;
-                  }
+            {analytics.topDishes.length ? (
+              <div className="archive-list analytics-section">
+                <article className="archive-card">
+                  <div className="panel-head">
+                    <div>
+                      <div className="eyebrow">Top-rated dishes</div>
+                      <h2>What the household likes most</h2>
+                    </div>
+                  </div>
 
-                  return (
-                    <article key={record.id} className="archive-card">
-                      <div className="archive-head">
+                  <div className="archive-dishes">
+                    {analytics.topDishes.map((dish) => (
+                      <div key={dish.name} className="archive-dish-row">
                         <div>
                           <strong>{dish.name}</strong>
-                          <p>{record.dishSnapshot?.dayName ? `${record.dishSnapshot.dayName} • ` : ""}{archive?.weekLabel || "Confirmed shopping week"} • {CATEGORY_LABELS[getDishCategory(dish)]}</p>
+                          <p>{dish.count} rating{dish.count === 1 ? "" : "s"}</p>
                         </div>
-                        <span className="chip">{formatCalories(dish.calories || estimateDishCalories(dish))} cal est.</span>
+                        <span className="chip chip-primary">{dish.average.toFixed(1)}/5</span>
                       </div>
+                    ))}
+                  </div>
+                </article>
 
-                      <div className="rating-row">
-                        {[1, 2, 3, 4, 5].map((value) => (
-                          <RatingButton
-                            key={value}
-                            value={value}
-                            active={record.rating === value}
-                            onClick={() => updateDishRating(record.id, value)}
-                          />
-                        ))}
+                <article className="archive-card">
+                  <div className="panel-head">
+                    <div>
+                      <div className="eyebrow">Recent ratings</div>
+                      <h2>Latest completed dish feedback</h2>
+                    </div>
+                  </div>
+
+                  <div className="archive-dishes">
+                    {analytics.recentRatings.map((record) => (
+                      <div key={record.id} className="archive-dish-row">
+                        <div>
+                          <strong>{record.dishSnapshot?.name || "Dish"}</strong>
+                          <p>{record.dishSnapshot?.dayName ? `${record.dishSnapshot.dayName} • ` : ""}{record.made ? "Made" : "Skipped"} • {new Date(record.confirmedAt).toLocaleDateString("en-US")}</p>
+                        </div>
+                        <span className="chip">{record.rating ? `${record.rating}/5` : "No rating"}</span>
                       </div>
-                    </article>
-                  );
-                })}
+                    ))}
+                  </div>
+                </article>
               </div>
             ) : (
               <p className="empty-copy">
-                Dishes move here automatically after you confirm <strong>GO SHOP</strong>.
+                Use the planner, go shopping, and complete a weekly review to populate analytics.
               </p>
             )}
           </section>
@@ -1231,10 +1564,113 @@ function App() {
     );
   }
 
+  function renderWeeklyReviewModal() {
+    if (!reviewModal.open) {
+      return null;
+    }
+
+    return (
+      <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Review last week's dishes">
+        <div className="modal-card">
+          <div className="panel-head">
+            <div>
+              <div className="eyebrow">Ready to shop</div>
+              <h2>What got made last week?</h2>
+            </div>
+            <button className="text-button" onClick={closeReviewModal}>
+              Close
+            </button>
+          </div>
+
+          <p className="empty-copy">Mark what actually got cooked, add a quick rating, and I’ll use that feedback for future dish suggestions before opening this week’s grocery list.</p>
+
+          <div className="modal-option-list">
+            {triedDishes.map((record) => {
+              const draft = reviewModal.records.find((item) => item.id === record.id);
+              const dish = record.dishSnapshot;
+
+              return (
+                <div key={record.id} className="modal-option-card review-option-card">
+                  <div>
+                    <strong>{dish?.dayName ? `${dish.dayName}: ${dish.name}` : dish?.name}</strong>
+                    <p>{CATEGORY_LABELS[dish?.category]} • {formatCalories(dish?.calories || 0)} cal est.</p>
+                  </div>
+                  <div className="review-controls">
+                    <label className="review-toggle">
+                      <input
+                        type="checkbox"
+                        checked={draft?.made ?? true}
+                        onChange={(event) => updateReviewModalRecord(record.id, { made: event.target.checked, rating: event.target.checked ? (draft?.rating || 0) : 0 })}
+                      />
+                      <span>Made it</span>
+                    </label>
+                    <div className="rating-row">
+                      {[1, 2, 3, 4, 5].map((value) => (
+                        <RatingButton
+                          key={`${record.id}-${value}`}
+                          value={value}
+                          active={draft?.rating === value}
+                          onClick={() => updateReviewModalRecord(record.id, { made: true, rating: value })}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="button-row modal-actions">
+            <button
+              className="ghost-button"
+              onClick={() => {
+                closeReviewModal();
+                setActiveTab("groceries");
+              }}
+            >
+              Skip for now
+            </button>
+            <button className="action-button" onClick={submitWeeklyReview}>
+              Save review and open grocery list
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderHelpModal() {
+    if (!helpOpen) {
+      return null;
+    }
+
+    return (
+      <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="How Dish Radar works">
+        <div className="modal-card help-modal-card">
+          <div className="panel-head">
+            <div>
+              <div className="eyebrow">Help</div>
+              <h2>How Dish Radar works</h2>
+            </div>
+            <button className="text-button" onClick={() => setHelpOpen(false)}>
+              Close
+            </button>
+          </div>
+
+          <p className="empty-copy">Plan dishes from the built-in recipe library, confirm shopping, and keep pantry leftovers until fully consumed.</p>
+
+          <ol className="workflow-list help-workflow-list">
+            {WORKFLOW_STEPS.map((step) => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page-shell">
-      {renderCompactOverview()}
-
       <nav className="tab-row" aria-label="Main sections">
         {TABS.map((tab) => (
           <button
@@ -1251,8 +1687,15 @@ function App() {
       {activeTab === "groceries" ? renderGroceriesTab() : null}
       {activeTab === "pantry" ? renderPantryTab() : null}
       {activeTab === "grocery-lists" ? renderArchivedListsTab() : null}
-      {activeTab === "tried" ? renderTriedDishesTab() : null}
+      {activeTab === "analytics" ? renderAnalyticsTab() : null}
+      <div className="page-help-bar">
+        <button className="ghost-button help-button" onClick={() => setHelpOpen(true)}>
+          Help
+        </button>
+      </div>
       {renderDayPickerModal()}
+      {renderWeeklyReviewModal()}
+      {renderHelpModal()}
     </div>
   );
 }
