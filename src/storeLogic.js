@@ -1,3 +1,7 @@
+import { ARCHIVE_DISH_POOL } from "./archiveDishPool";
+import { DISH_POOL } from "./mockDishPool";
+import { buildRecipeMatrixDishes } from "./recipeMatrix";
+
 const STORE_PROFILES = {
   traderJoes: {
     id: "traderJoes",
@@ -317,6 +321,8 @@ const CUISINE_KEYWORDS = [
   "south east asian",
 ];
 
+const LOCAL_DISH_LIBRARY_KEYS = Object.keys(CATEGORY_QUERY_CONFIG);
+
 function formatQtyValue(value) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
@@ -327,6 +333,113 @@ function normalizeName(value) {
 
 function normalizeText(value) {
   return `${value || ""}`.toLowerCase().trim();
+}
+
+function buildLocalIngredientId(ingredient) {
+  return normalizeName(`${ingredient.name}-${ingredient.unit}`);
+}
+
+function inferCategoryFromLocalDish(dish) {
+  if (dish.category) {
+    return dish.category;
+  }
+
+  const text = [
+    dish.name,
+    ...(dish.tags || []),
+    ...(dish.sources || []),
+  ]
+    .map(normalizeText)
+    .join(" ");
+
+  if (/(soup|stew|chili|chowder)/.test(text)) {
+    return "soups-stews-chilis";
+  }
+
+  if (/(pasta|noodle|udon|ramen|rigatoni|gemelli|orzo|gnocchi|tortellini|risoni)/.test(text)) {
+    return "pasta-noodles";
+  }
+
+  if (/(taco|wrap|burger|sandwich|sub|slider|pita|quesadilla|crunchwrap|pizza|flatbread|toast)/.test(text)) {
+    return "handhelds-casual";
+  }
+
+  if (/(skillet|bake|pot pie|rice pot|one pot|casserole)/.test(text)) {
+    return "one-pot";
+  }
+
+  if (/salad/.test(text)) {
+    return "salads-veggie-bowls";
+  }
+
+  if (/bowl/.test(text)) {
+    return (dish.tags || []).includes("veg") || (dish.tags || []).includes("fresh")
+      ? "salads-veggie-bowls"
+      : "balanced-plate";
+  }
+
+  return "balanced-plate";
+}
+
+function normalizeLocalDish(dish) {
+  return {
+    ...dish,
+    category: inferCategoryFromLocalDish(dish),
+    cuisines: dish.cuisines || [],
+    dishTypes: dish.dishTypes || [],
+    mealTypes: dish.mealTypes || [],
+    ingredients: (dish.ingredients || []).map((ingredient) => ({
+      id: ingredient.id || buildLocalIngredientId(ingredient),
+      ...ingredient,
+    })),
+  };
+}
+
+function buildLocalDishLibrary(triedDishes) {
+  const basePool = [...DISH_POOL, ...ARCHIVE_DISH_POOL].map(normalizeLocalDish);
+  const matrixPool = buildRecipeMatrixDishes(basePool, triedDishes, (dish) => dish.category).map(normalizeLocalDish);
+  const merged = new Map();
+
+  [...basePool, ...matrixPool].forEach((dish) => {
+    merged.set(dish.id, dish);
+  });
+
+  return Array.from(merged.values());
+}
+
+function scoreDishAgainstPreferences(dish, biasKeywords) {
+  if (!biasKeywords.length) {
+    return 0;
+  }
+
+  const haystack = [
+    dish.name,
+    dish.trendNote,
+    ...(dish.tags || []),
+    ...(dish.cuisines || []),
+    ...(dish.sources || []),
+  ]
+    .map(normalizeText)
+    .join(" ");
+
+  return biasKeywords.reduce((total, keyword, index) => {
+    if (!keyword || !haystack.includes(keyword)) {
+      return total;
+    }
+
+    return total + (biasKeywords.length - index);
+  }, 0);
+}
+
+function shuffleCollection(items) {
+  const next = [...items];
+
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+
+  return next;
 }
 
 function formatQty(amount, unit) {
@@ -675,24 +788,6 @@ function normalizeIngredientAmount(value) {
   return Math.round(value * 10) / 10;
 }
 
-export function normalizeEdamamIngredient(ingredient) {
-  const category = inferIngredientCategory(ingredient);
-  const unit = cleanMeasure(ingredient.measure);
-  const amount = normalizeIngredientAmount(ingredient.quantity);
-
-  return {
-    id: buildIngredientId(ingredient),
-    name: ingredient.food || ingredient.text || "ingredient",
-    amount,
-    unit,
-    category,
-    basePrice: getBasePrice(category),
-    calories: Number.isFinite(ingredient.weight) ? Math.round(ingredient.weight * 1.8) : undefined,
-    text: ingredient.text || "",
-    foodCategory: ingredient.foodCategory || "",
-  };
-}
-
 function cleanTag(value) {
   return normalizeText(value).replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
@@ -764,40 +859,6 @@ function buildRecipeTags(recipe, category) {
   return [...new Set(tags)].slice(0, 6);
 }
 
-export function normalizeEdamamRecipe(hit, fallbackCategory = "") {
-  const recipe = hit.recipe || hit;
-  if (!recipe?.uri || !recipe?.label || !Array.isArray(recipe.ingredients) || !recipe.ingredients.length) {
-    return null;
-  }
-
-  const category = inferCategoryFromRecipe(recipe, fallbackCategory);
-  const ingredients = recipe.ingredients.slice(0, 12).map(normalizeEdamamIngredient);
-  const time = Number.isFinite(recipe.totalTime) && recipe.totalTime > 0
-    ? Math.round(recipe.totalTime)
-    : Math.max(15, Math.min(45, ingredients.length * 5));
-
-  const cuisineTags = (recipe.cuisineType || []).map((value) => cleanTag(value)).filter(Boolean);
-  const dishTags = (recipe.dishType || []).map((value) => cleanTag(value)).filter(Boolean);
-
-  return {
-    id: normalizeName(recipe.uri),
-    uri: recipe.uri,
-    name: recipe.label,
-    time,
-    calories: Number.isFinite(recipe.calories) ? Math.round(recipe.calories) : undefined,
-    category,
-    tags: buildRecipeTags(recipe, category),
-    trendNote: `${recipe.source || "Edamam"} recipe pulled live from Edamam search.`,
-    sources: [recipe.source || "Edamam", "Edamam API"],
-    image: recipe.image || recipe.images?.REGULAR?.url || "",
-    url: recipe.url || "",
-    ingredients,
-    cuisines: cuisineTags,
-    dishTypes: dishTags,
-    mealTypes: (recipe.mealType || []).map((value) => cleanTag(value)).filter(Boolean),
-  };
-}
-
 function pickQueryIndex(seed, size) {
   return size ? seed % size : 0;
 }
@@ -845,53 +906,43 @@ function buildSearchPhrase(category, queryIndex, biasKeywords) {
   return [cuisineBias, flavorBias, baseQuery].filter(Boolean).join(" ").trim();
 }
 
-export async function fetchEdamamRecipes({ categories, triedDishes, limit = 30 }) {
-  const appId = import.meta.env.VITE_EDAMAM_APP_ID;
-  const appKey = import.meta.env.VITE_EDAMAM_APP_KEY;
-
-  if (!appId || !appKey) {
-    throw new Error("Missing Edamam API credentials in environment variables.");
-  }
-
-  const activeCategories = categories?.length ? categories : Object.keys(CATEGORY_QUERY_CONFIG);
+export async function fetchDishOptions({ categories, triedDishes, limit = 30 }) {
+  const activeCategories = categories?.length ? categories : LOCAL_DISH_LIBRARY_KEYS;
   const biasKeywords = extractPreferenceKeywords(triedDishes);
-  const perCategory = Math.max(4, Math.ceil(limit / activeCategories.length));
-  const timeSeed = Math.floor(Date.now() / 60000);
+  const library = buildLocalDishLibrary(triedDishes);
+  const scored = library
+    .filter((dish) => activeCategories.includes(dish.category))
+    .map((dish) => {
+      const categoryBoost = activeCategories.length === 1 && dish.category === activeCategories[0] ? 10 : 0;
+      const queryBoost = activeCategories.reduce((total, category, index) => {
+        const searchPhrase = buildSearchPhrase(category, index, biasKeywords);
+        const searchTokens = normalizeText(searchPhrase).split(/[^a-z0-9]+/).filter(Boolean);
+        const haystack = [
+          dish.name,
+          dish.trendNote,
+          ...(dish.tags || []),
+          ...(dish.sources || []),
+        ]
+          .map(normalizeText)
+          .join(" ");
 
-  const responses = await Promise.all(activeCategories.map(async (category, index) => {
-    const config = CATEGORY_QUERY_CONFIG[category] || CATEGORY_QUERY_CONFIG["balanced-plate"];
-    const phrase = buildSearchPhrase(category, timeSeed + index, biasKeywords);
-    const url = new URL("https://api.edamam.com/api/recipes/v2");
-    url.searchParams.set("type", "public");
-    url.searchParams.set("q", phrase);
-    url.searchParams.set("app_id", appId);
-    url.searchParams.set("app_key", appKey);
-    url.searchParams.set("imageSize", "REGULAR");
-    if (config.dishType) {
-      url.searchParams.set("dishType", config.dishType);
-    }
+        return total + searchTokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), 0);
+      }, 0);
 
-    const response = await fetch(url.toString());
-    if (!response.ok) {
-      throw new Error(`Edamam search failed for ${category} (${response.status}).`);
-    }
+      return {
+        dish,
+        score: scoreDishAgainstPreferences(dish, biasKeywords) + categoryBoost + queryBoost,
+      };
+    });
 
-    const json = await response.json();
-    return (json.hits || [])
-      .map((hit) => normalizeEdamamRecipe(hit, category))
-      .filter(Boolean)
-      .slice(0, perCategory);
-  }));
-
-  const unique = new Map();
-  responses.flat().forEach((dish) => {
-    if (!unique.has(dish.id)) {
-      unique.set(dish.id, dish);
-    }
-  });
+  const shuffled = shuffleCollection(scored);
+  const dishes = shuffled
+    .sort((left, right) => right.score - left.score || left.dish.name.localeCompare(right.dish.name))
+    .map(({ dish }) => dish)
+    .slice(0, limit);
 
   return {
-    dishes: Array.from(unique.values()).slice(0, limit),
+    dishes,
     biasKeywords,
   };
 }

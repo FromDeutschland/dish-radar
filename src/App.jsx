@@ -3,7 +3,7 @@ import {
   buildGoogleSheetPayload,
   createShoppingPlan,
   estimateDishCalories,
-  fetchEdamamRecipes,
+  fetchDishOptions,
   formatCalories,
   formatCurrency,
   pushShoppingPlanToGoogleSheet,
@@ -58,7 +58,7 @@ const PANTRY_STATUSES = [
 const WORKFLOW_STEPS = [
   "1. Pick meal types for the week.",
   "2. Choose a dish type for a day.",
-  "3. Pick that day’s dish from 50 live options.",
+  "3. Pick that day’s dish from 50 matching options.",
   "4. Review the Grocery List tab.",
   "5. Click Go Shop to export the final list and update pantry leftovers.",
 ];
@@ -356,7 +356,7 @@ function App() {
     const counts = new Map();
 
     selectedDayEntries.forEach(({ dish }) => {
-      const source = dish.sources[0] || "Edamam";
+      const source = dish.sources[0] || "Dish Radar";
       counts.set(source, (counts.get(source) || 0) + 1);
     });
 
@@ -489,7 +489,7 @@ function App() {
     setFetchState((current) => ({ ...current, error: "", exportMessage: "" }));
 
     try {
-      const result = await fetchEdamamRecipes({
+      const result = await fetchDishOptions({
         categories: [category],
         triedDishes,
         limit: 50,
@@ -675,9 +675,9 @@ function App() {
     return (
       <header className="workflow-panel">
         <div className="workflow-head">
-          <div>
-            <div className="eyebrow">Dish Radar</div>
-            <h1>Generate live recipes, confirm shopping, and keep pantry leftovers until fully consumed.</h1>
+            <div>
+              <div className="eyebrow">Dish Radar</div>
+            <h1>Plan dishes from the built-in recipe library, confirm shopping, and keep pantry leftovers until fully consumed.</h1>
           </div>
           <div className="workflow-stats">
             <span>{selectedCategories.length} days planned</span>
@@ -797,7 +797,7 @@ function App() {
             <p>
               {sourceMix.length
                 ? `Current chosen dishes come from: ${sourceMix.map((item) => `${item.source} (${item.count})`).join(", ")}.`
-                : "Day pickers use live Edamam recipe results instead of the old local dish array."}
+                : "Day pickers use the built-in recipe library, archive dishes, and rating-based variations."}
             </p>
             {fetchState.error ? <p>{fetchState.error}</p> : null}
           </div>
@@ -826,7 +826,7 @@ function App() {
               </div>
             ) : (
               <p className="empty-copy">
-                Pick a meal type for a day, then choose one recipe from the 50 live options shown for that day.
+                Pick a meal type for a day, then choose one recipe from the 50 matching options shown for that day.
               </p>
             )}
           </section>
@@ -1208,7 +1208,7 @@ function App() {
             </button>
           </div>
 
-          {dayPicker.loading ? <p className="empty-copy">Loading 50 live options for this day...</p> : null}
+          {dayPicker.loading ? <p className="empty-copy">Loading 50 matching options for this day...</p> : null}
           {dayPicker.error ? <p className="empty-copy">{dayPicker.error}</p> : null}
 
           {!dayPicker.loading && !dayPicker.error ? (
@@ -1217,7 +1217,7 @@ function App() {
                 <div key={`${dayPicker.dayName}-${dish.id}`} className="modal-option-card">
                   <div>
                     <strong>{dish.name}</strong>
-                    <p>{formatCalories(estimateDishCalories(dish))} cal est. • {dish.time} min • {dish.sources[0] || "Edamam"}</p>
+                    <p>{formatCalories(estimateDishCalories(dish))} cal est. • {dish.time} min • {dish.sources[0] || "Dish Radar"}</p>
                   </div>
                   <button className="action-button" onClick={() => applyDayDishSelection(dayPicker.dayName, dish)}>
                     Select
