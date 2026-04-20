@@ -117,6 +117,8 @@ export const INGREDIENT_LIBRARY_UPDATED_AT = "2026-04-19";
 
 const THEMEALDB_API_KEY = import.meta.env.VITE_THEMEALDB_API_KEY || "1";
 const THEMEALDB_BASE = `https://www.themealdb.com/api/json/v1/${THEMEALDB_API_KEY}`;
+const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 const THEMEALDB_LETTERS = "abcdefghijklmnopqrstuvwxyz".split("");
 const ALL_APP_CATEGORIES = [
   "salads-veggie-bowls",
@@ -186,6 +188,36 @@ const DESCRIPTOR_UNITS = new Set([
   "peeled",
   "halved",
   "crushed",
+]);
+
+const DISPLAY_OMIT_UNITS = new Set(["piece"]);
+
+const RECOGNIZED_UNITS = new Set([
+  "g",
+  "kg",
+  "ml",
+  "l",
+  "oz",
+  "lb",
+  "cup",
+  "tbsp",
+  "tsp",
+  "slice",
+  "clove",
+  "handful",
+  "bunch",
+  "piece",
+  "jar",
+  "can",
+  "bottle",
+  "bag",
+  "box",
+  "pack",
+  "tub",
+  "block",
+  "tin",
+  "fillet",
+  "loaf",
 ]);
 
 const PACKAGE_EQUIVALENTS = {
@@ -289,6 +321,46 @@ const PACKAGE_EQUIVALENTS = {
     bakery: 1,
     frozen: 1,
   },
+  jar: {
+    pantry: 1,
+    specialty: 1,
+    dairy: 1,
+  },
+  can: {
+    pantry: 1,
+    specialty: 1,
+  },
+  bottle: {
+    pantry: 1,
+    specialty: 1,
+  },
+  bag: {
+    pantry: 1,
+    frozen: 1,
+    produce: 1,
+  },
+  box: {
+    pantry: 1,
+    frozen: 1,
+    bakery: 1,
+  },
+  pack: {
+    pantry: 1,
+    frozen: 1,
+    dairy: 1,
+    bakery: 1,
+  },
+  tub: {
+    dairy: 1,
+    specialty: 1,
+  },
+  block: {
+    dairy: 1,
+  },
+  fillet: {
+    seafood: 1,
+    protein: 1,
+  },
 };
 
 let mealLibraryPromise;
@@ -313,6 +385,25 @@ function formatQtyValue(value) {
 
 function formatQty(amount, unit) {
   return `${formatQtyValue(amount)} ${unit}`;
+}
+
+export function formatIngredientDisplay(ingredient) {
+  if (!ingredient?.name) {
+    return "";
+  }
+
+  const amount = Number.isFinite(ingredient.amount) && ingredient.amount > 0 ? formatQtyValue(ingredient.amount) : "";
+  const unit = cleanMeasure(ingredient.unit || "");
+
+  if (!amount) {
+    return ingredient.name;
+  }
+
+  if (!unit || DISPLAY_OMIT_UNITS.has(unit)) {
+    return `${amount} ${ingredient.name}`.trim();
+  }
+
+  return `${amount} ${unit} ${ingredient.name}`.trim();
 }
 
 export function formatCurrency(value) {
@@ -354,6 +445,8 @@ function cleanMeasure(value) {
   if (!normalized || normalized === "to taste" || /^\d+(\.\d+)?$/.test(normalized)) {
     return "piece";
   }
+  if (/^(lb|lbs)$/.test(normalized)) return "lb";
+  if (/^(oz|ounce|ounces)$/.test(normalized)) return "oz";
   if (/^g(ram)?s?$/.test(normalized)) return "g";
   if (/^kg|kilogram/.test(normalized)) return "kg";
   if (/^ml$|millilit/.test(normalized)) return "ml";
@@ -367,10 +460,40 @@ function cleanMeasure(value) {
   if (normalized.includes("clove")) return "clove";
   if (normalized.includes("handful")) return "handful";
   if (normalized.includes("bunch")) return "bunch";
+  if (normalized.includes("jar")) return "jar";
+  if (normalized.includes("can") || normalized.includes("tin")) return "can";
+  if (normalized.includes("bottle")) return "bottle";
+  if (normalized.includes("bag")) return "bag";
+  if (normalized.includes("box")) return "box";
+  if (normalized.includes("pack")) return "pack";
+  if (normalized.includes("tub")) return "tub";
+  if (normalized.includes("block")) return "block";
+  if (normalized.includes("fillet")) return "fillet";
+  if (normalized.includes("loaf")) return "loaf";
+  if (normalized.includes("head")) return "piece";
+  if (normalized.includes("stick")) return "piece";
   if (normalized.includes("leaves") || normalized.includes("sprig")) return "bunch";
   if (normalized.includes("juice")) return "piece";
   if (DESCRIPTOR_UNITS.has(normalized)) return "piece";
   return normalized.replace(/[^a-z0-9]+/g, " ").trim() || "piece";
+}
+
+function normalizeUnitAgainstAmount(amount, unit) {
+  const normalizedUnit = cleanMeasure(unit);
+
+  if (!normalizedUnit || normalizedUnit === "piece") {
+    return "piece";
+  }
+
+  if (/^\d+(\.\d+)?$/.test(normalizedUnit)) {
+    return "piece";
+  }
+
+  if (Number.isFinite(amount) && normalizedUnit === formatQtyValue(amount)) {
+    return "piece";
+  }
+
+  return normalizedUnit;
 }
 
 function parseMeasureValue(measure) {
@@ -395,9 +518,10 @@ function parseMeasureValue(measure) {
   }
 
   const remainder = tokens.slice(consumed).join(" ").trim();
+  const roundedAmount = amount > 0 ? Math.round(amount * 10) / 10 : 1;
   return {
-    amount: amount > 0 ? Math.round(amount * 10) / 10 : 1,
-    unit: cleanMeasure(remainder || prepared),
+    amount: roundedAmount,
+    unit: normalizeUnitAgainstAmount(roundedAmount, remainder || prepared),
   };
 }
 
@@ -413,6 +537,9 @@ function normalizeShoppingAmount(amount, unit, category) {
 }
 
 function formatShoppingQty(amount, unit) {
+  if (unit === "piece") {
+    return formatQtyValue(amount);
+  }
   if (unit === "g" || unit === "ml") {
     return `${Math.round(amount)} ${unit}`;
   }
@@ -444,6 +571,164 @@ function inferIngredientCategoryFromName(name) {
     return "specialty";
   }
   return "pantry";
+}
+
+function isRecognizedIngredientUnit(token) {
+  const normalized = cleanMeasure(token);
+  return RECOGNIZED_UNITS.has(normalized) || DESCRIPTOR_UNITS.has(normalizeText(token));
+}
+
+function parseIngredientText(line) {
+  const raw = `${line || ""}`.trim();
+  if (!raw) {
+    return null;
+  }
+
+  const compactLeading = raw.match(/^(\d+(?:\.\d+)?)([a-zA-Z]+)\s+(.*)$/);
+  const expanded = compactLeading ? `${compactLeading[1]} ${compactLeading[2]} ${compactLeading[3]}` : raw;
+  const tokens = expanded.split(/\s+/).filter(Boolean);
+  let amount = 0;
+  let consumed = 0;
+
+  while (consumed < tokens.length) {
+    const parsed = parseFractionToken(tokens[consumed]);
+    if (parsed === null) {
+      break;
+    }
+    amount += parsed;
+    consumed += 1;
+  }
+
+  if (!amount) {
+    return {
+      name: raw,
+      amount: 1,
+      unit: "piece",
+    };
+  }
+
+  const rest = tokens.slice(consumed);
+  if (!rest.length) {
+    return {
+      name: raw,
+      amount,
+      unit: "piece",
+    };
+  }
+
+  const firstRest = rest[0];
+  const useFirstAsUnit = isRecognizedIngredientUnit(firstRest);
+  const unit = useFirstAsUnit ? cleanMeasure(firstRest) : "piece";
+  const name = (useFirstAsUnit ? rest.slice(1) : rest).join(" ").trim() || raw;
+
+  return {
+    name,
+    amount,
+    unit: normalizeUnitAgainstAmount(amount, unit),
+  };
+}
+
+function normalizeAppCategory(value) {
+  const normalized = normalizeText(value).replace(/[^a-z0-9]+/g, "-");
+  const directMatch = ALL_APP_CATEGORIES.find((category) => category === normalized);
+  if (directMatch) {
+    return directMatch;
+  }
+
+  if (/(salad|veggie|vegetable|bowl|slaw)/.test(normalized)) return "salads-veggie-bowls";
+  if (/(protein|balanced|plate|main)/.test(normalized)) return "balanced-plate";
+  if (/(pasta|noodle)/.test(normalized)) return "pasta-noodles";
+  if (/(one-pot|onepot|curry|skillet|risotto|casserole)/.test(normalized)) return "one-pot";
+  if (/(handheld|casual|sandwich|taco|burger|wrap|pizza)/.test(normalized)) return "handhelds-casual";
+  if (/(soup|stew|chili|chilli|broth)/.test(normalized)) return "soups-stews-chilis";
+  return "";
+}
+
+function normalizeIngredientRecord(rawIngredient) {
+  if (!rawIngredient) {
+    return null;
+  }
+
+  if (typeof rawIngredient === "string") {
+    const parsed = parseIngredientText(rawIngredient);
+    if (!parsed?.name) {
+      return null;
+    }
+
+    const category = inferIngredientCategoryFromName(parsed.name);
+    return {
+      id: normalizeName(parsed.name),
+      name: parsed.name,
+      amount: Math.max(Math.round((parsed.amount || 1) * 100) / 100, 0.1),
+      unit: normalizeUnitAgainstAmount(parsed.amount || 1, parsed.unit),
+      category,
+      basePrice: getBasePrice(category),
+    };
+  }
+
+  const name = `${rawIngredient.name || rawIngredient.ingredient || ""}`.trim();
+  if (!name) {
+    return null;
+  }
+
+  const parsedFromQty = rawIngredient.qty ? parseIngredientText(`${rawIngredient.qty} ${name}`) : null;
+  const parsedAmount = Number.isFinite(Number(rawIngredient.amount)) ? Number(rawIngredient.amount) : parsedFromQty?.amount || 1;
+  const parsedUnit = rawIngredient.unit || parsedFromQty?.unit || "piece";
+  const category = rawIngredient.category || inferIngredientCategoryFromName(name);
+
+  return {
+    id: rawIngredient.id || rawIngredient.ingredientId || normalizeName(name),
+    name,
+    amount: Math.max(Math.round(parsedAmount * 100) / 100, 0.1),
+    unit: normalizeUnitAgainstAmount(parsedAmount, parsedUnit),
+    category,
+    basePrice: Number.isFinite(Number(rawIngredient.basePrice)) ? Number(rawIngredient.basePrice) : getBasePrice(category),
+  };
+}
+
+function normalizeDishRecord(dish) {
+  if (!dish || !dish.name) {
+    return null;
+  }
+
+  const instructions = Array.isArray(dish.instructions)
+    ? dish.instructions.map((step) => `${step || ""}`.trim()).filter(Boolean)
+    : parseInstructions(dish.instructions);
+  const ingredients = (dish.ingredients || []).map(normalizeIngredientRecord).filter(Boolean);
+  const category = normalizeAppCategory(dish.category)
+    || inferAppCategoryFromMeal({
+      strMeal: dish.name,
+      strCategory: dish.category || "",
+      strInstructions: instructions.join(" "),
+    });
+  const time = Number.isFinite(Number(dish.time))
+    ? Number(dish.time)
+    : estimatePrepTime(
+      { strMeal: dish.name, strInstructions: instructions.join(" "), strCategory: category },
+      ingredients.length,
+      instructions.length,
+    );
+  const meta = dish.meta && typeof dish.meta === "object" ? dish.meta : {};
+
+  return {
+    id: dish.id || normalizeName(dish.name),
+    name: dish.name,
+    category,
+    time,
+    calories: Number.isFinite(Number(dish.calories)) ? Number(dish.calories) : null,
+    trendNote: dish.trendNote || (meta.isAI ? "Bespoke AI recipe created by Gemini Chef." : "Recipe ready for this week’s plan."),
+    sources: Array.isArray(dish.sources) && dish.sources.length ? dish.sources : [meta.isAI ? "Gemini Chef" : "Dish Radar"],
+    cuisines: Array.isArray(dish.cuisines) ? dish.cuisines.filter(Boolean) : [],
+    tags: Array.isArray(dish.tags) ? dish.tags.filter(Boolean) : [],
+    instructions,
+    image: dish.image || "",
+    ingredients,
+    meta,
+  };
+}
+
+export function sanitizeStoredDishes(dishes) {
+  return (Array.isArray(dishes) ? dishes : []).map(normalizeDishRecord).filter(Boolean);
 }
 
 function estimateIngredientCalories(ingredient) {
@@ -729,6 +1014,7 @@ function normalizeMealDbMeal(meal) {
     instructions,
     image: meal.strMealThumb || "",
     ingredients,
+    meta: { isAI: false },
   };
 }
 
@@ -864,13 +1150,18 @@ function shuffleCollection(items) {
   return next;
 }
 
-export async function fetchDishOptions({ categories, triedDishes, limit = 30 }) {
+export async function fetchDishOptions({ categories, triedDishes, limit = 30, customRecipes = [] }) {
   const activeCategories = categories?.length ? categories : ALL_APP_CATEGORIES;
   const biasKeywords = extractPreferenceKeywords(triedDishes);
   const library = await loadMealLibrary();
+  const mergedLibrary = Array.from(
+    new Map(
+      [...library, ...sanitizeStoredDishes(customRecipes)].map((dish) => [dish.id, dish]),
+    ).values(),
+  );
 
   const dishes = shuffleCollection(
-    library
+    mergedLibrary
       .filter((dish) => activeCategories.includes(dish.category))
       .map((dish) => ({
         dish,
@@ -888,6 +1179,126 @@ export async function fetchDishOptions({ categories, triedDishes, limit = 30 }) 
     dishes,
     biasKeywords,
   };
+}
+
+function buildGeminiRecipePrompt(prompt, category) {
+  const categoryLabel = normalizeAppCategory(category) || "balanced-plate";
+  return [
+    "You are Gemini Chef, an expert dinner recipe creator for a luxury weekly planner.",
+    `Create one original dinner recipe for this request: "${prompt}".`,
+    `Target meal category: "${categoryLabel}".`,
+    "Return only JSON that matches the supplied schema.",
+    "Use realistic quantities for 2 to 4 servings.",
+    "Write instructions as one string with numbered steps.",
+    "Make the dish feel polished, practical, and appealing for home cooking.",
+  ].join("\n");
+}
+
+function normalizeSyntheticRecipe(payload, fallbackCategory, prompt) {
+  const instructions = parseInstructions(payload.instructions || "");
+  const ingredients = (payload.ingredients || []).map(normalizeIngredientRecord).filter(Boolean);
+  const category = normalizeAppCategory(payload.category) || normalizeAppCategory(fallbackCategory) || "balanced-plate";
+  const prepTimeMinutes = Number.isFinite(Number(payload.meta?.prepTimeMinutes))
+    ? Number(payload.meta.prepTimeMinutes)
+    : estimatePrepTime(
+      { strMeal: payload.name, strInstructions: instructions.join(" "), strCategory: category },
+      ingredients.length,
+      instructions.length,
+    );
+
+  return normalizeDishRecord({
+    id: payload.id || `gemini-${normalizeName(payload.name || prompt)}-${Date.now()}`,
+    name: payload.name || prompt,
+    category,
+    time: prepTimeMinutes,
+    trendNote: "Bespoke AI recipe created by Gemini Chef for your personal library.",
+    sources: ["Gemini Chef"],
+    cuisines: payload.meta?.cuisine ? [payload.meta.cuisine] : [],
+    tags: Array.isArray(payload.meta?.tags) ? payload.meta.tags : [],
+    instructions,
+    ingredients,
+    meta: {
+      ...(payload.meta || {}),
+      isAI: true,
+      prompt,
+      generatedAt: new Date().toISOString(),
+    },
+  });
+}
+
+export async function generateSyntheticRecipe(prompt, category = "balanced-plate") {
+  if (!GEMINI_API_KEY) {
+    throw new Error("Gemini Chef is not configured. Add VITE_GEMINI_API_KEY to continue.");
+  }
+
+  const response = await fetch(GEMINI_BASE, {
+    method: "POST",
+    headers: {
+      "x-goog-api-key": GEMINI_API_KEY,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            {
+              text: buildGeminiRecipePrompt(prompt, category),
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseJsonSchema: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            category: { type: "string" },
+            instructions: { type: "string" },
+            ingredients: {
+              type: "array",
+              items: { type: "string" },
+            },
+            meta: {
+              type: "object",
+              properties: {
+                isAI: { type: "boolean" },
+                cuisine: { type: "string" },
+                tags: {
+                  type: "array",
+                  items: { type: "string" },
+                },
+                prepTimeMinutes: { type: "integer" },
+              },
+              required: ["isAI"],
+            },
+          },
+          required: ["name", "category", "instructions", "ingredients", "meta"],
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gemini Chef request failed (${response.status}).`);
+  }
+
+  const result = await response.json();
+  const rawText = result?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
+
+  if (!rawText) {
+    throw new Error("Gemini Chef returned an empty recipe.");
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(rawText);
+  } catch {
+    throw new Error("Gemini Chef returned invalid JSON.");
+  }
+
+  return normalizeSyntheticRecipe(payload, category, prompt);
 }
 
 export async function pushShoppingPlanToGoogleSheet(payload) {

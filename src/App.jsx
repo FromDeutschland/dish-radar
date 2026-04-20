@@ -7,9 +7,12 @@ import {
   fetchRecipeDatabaseMeta,
   formatCalories,
   formatCurrency,
+  formatIngredientDisplay,
+  generateSyntheticRecipe,
   getDishLibrarySnapshot,
   INGREDIENT_LIBRARY_UPDATED_AT,
   pushShoppingPlanToGoogleSheet,
+  sanitizeStoredDishes,
 } from "./storeLogic";
 
 const STORAGE_KEYS = {
@@ -24,6 +27,7 @@ const STORAGE_KEYS = {
   triedDishes: "dish-radar.tried-dishes",
   weekSelections: "dish-radar.week-selections",
   wishlistIds: "dish-radar.wishlist-ids",
+  customCodex: "custom_codex",
 };
 
 const TABS = [
@@ -96,12 +100,6 @@ function roundAmount(value) {
 
 function formatAmount(value) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "");
-}
-
-function formatIngredientLine(ingredient) {
-  const amount = ingredient.amount ? formatAmount(ingredient.amount) : "";
-  const unit = ingredient.unit || "";
-  return [amount, unit, ingredient.name].filter(Boolean).join(" ");
 }
 
 function getSavedActiveTab() {
@@ -333,13 +331,27 @@ function RatingButton({ active, value, onClick }) {
   );
 }
 
+function createEmptyDayPicker() {
+  return {
+    dayName: "",
+    category: "",
+    options: [],
+    loading: false,
+    error: "",
+    chefPrompt: "",
+    generatingAI: false,
+    aiError: "",
+  };
+}
+
 function App() {
   const [activeTab, setActiveTab] = useState(() => getSavedActiveTab());
   const [weekSelections, setWeekSelections] = useState(() => getSavedWeekSelections());
   const [triedDishes, setTriedDishes] = useState(() => safeRead(STORAGE_KEYS.triedDishes, []));
   const [ratingHistory, setRatingHistory] = useState(() => safeRead(STORAGE_KEYS.ratingHistory, []));
   const [dayDishSelections, setDayDishSelections] = useState(() => safeRead(STORAGE_KEYS.dayDishSelections, {}));
-  const [dishCatalog, setDishCatalog] = useState(() => safeRead(STORAGE_KEYS.dishCatalog, []));
+  const [customCodex, setCustomCodex] = useState(() => sanitizeStoredDishes(safeRead(STORAGE_KEYS.customCodex, [])));
+  const [dishCatalog, setDishCatalog] = useState(() => sanitizeStoredDishes(safeRead(STORAGE_KEYS.dishCatalog, [])));
   const [deckIds, setDeckIds] = useState(() => safeRead(STORAGE_KEYS.deckIds, []));
   const [wishlistIds, setWishlistIds] = useState(() => safeRead(STORAGE_KEYS.wishlistIds, []));
   const [manualPantryItems, setManualPantryItems] = useState(() => safeRead(STORAGE_KEYS.manualPantryItems, []));
@@ -352,13 +364,7 @@ function App() {
   const [recipeDatabaseMeta, setRecipeDatabaseMeta] = useState(null);
   const [selectedArchiveId, setSelectedArchiveId] = useState(null);
   const [reviewModal, setReviewModal] = useState({ open: false, records: [] });
-  const [dayPicker, setDayPicker] = useState({
-    dayName: "",
-    category: "",
-    options: [],
-    loading: false,
-    error: "",
-  });
+  const [dayPicker, setDayPicker] = useState(() => createEmptyDayPicker());
 
   const weekDays = getCurrentWeekDates();
   const selectedCategories = getSelectedCategories(weekSelections);
@@ -519,6 +525,10 @@ function App() {
   }, [dayDishSelections]);
 
   useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.customCodex, JSON.stringify(customCodex));
+  }, [customCodex]);
+
+  useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.dishCatalog, JSON.stringify(dishCatalog));
   }, [dishCatalog]);
 
@@ -592,6 +602,14 @@ function App() {
     }
   }, [archivedLists, selectedArchiveId]);
 
+  useEffect(() => {
+    if (!customCodex.length) {
+      return;
+    }
+
+    setDishCatalog((current) => mergeDishCatalog(current, customCodex));
+  }, [customCodex]);
+
   async function refreshDeck(nextSelections = weekSelections) {
     const dayToRefresh = dayPicker.dayName && nextSelections[dayPicker.dayName]
       ? dayPicker.dayName
@@ -610,16 +628,15 @@ function App() {
 
   async function openDayDishPicker(dayName, category) {
     if (!category) {
-      setDayPicker({ dayName: "", category: "", options: [], loading: false, error: "" });
+      setDayPicker(createEmptyDayPicker());
       return;
     }
 
     setDayPicker({
+      ...createEmptyDayPicker(),
       dayName,
       category,
-      options: [],
       loading: true,
-      error: "",
     });
     setFetchState((current) => ({ ...current, error: "", exportMessage: "" }));
 
@@ -628,15 +645,15 @@ function App() {
         categories: [category],
         triedDishes: ratingHistory,
         limit: 50,
+        customRecipes: customCodex,
       });
 
       setDishCatalog((current) => mergeDishCatalog(current, result.dishes));
       setDayPicker({
+        ...createEmptyDayPicker(),
         dayName,
         category,
         options: result.dishes.filter((dish) => getDishCategory(dish) === category),
-        loading: false,
-        error: "",
       });
       setFetchState((current) => ({
         ...current,
@@ -644,10 +661,9 @@ function App() {
       }));
     } catch (error) {
       setDayPicker({
+        ...createEmptyDayPicker(),
         dayName,
         category,
-        options: [],
-        loading: false,
         error: error.message || "Unable to load day-specific dish options right now.",
       });
     }
@@ -663,7 +679,7 @@ function App() {
     if (nextCategory) {
       openDayDishPicker(dayName, nextCategory);
     } else {
-      setDayPicker({ dayName: "", category: "", options: [], loading: false, error: "" });
+      setDayPicker(createEmptyDayPicker());
     }
   }
 
@@ -671,13 +687,42 @@ function App() {
     setWeekSelections(getDefaultWeekSelections());
     setDayDishSelections({});
     setDeckIds([]);
-    setDayPicker({ dayName: "", category: "", options: [], loading: false, error: "" });
+    setDayPicker(createEmptyDayPicker());
   }
 
   function applyDayDishSelection(dayName, dish) {
     setDishCatalog((current) => mergeDishCatalog(current, [dish]));
     setDayDishSelections((current) => ({ ...current, [dayName]: dish.id }));
-    setDayPicker({ dayName: "", category: "", options: [], loading: false, error: "" });
+    setDayPicker(createEmptyDayPicker());
+  }
+
+  async function handleGenerateSyntheticDish() {
+    const activeDay = dayPicker.dayName;
+    const activeCategory = dayPicker.category;
+    const chefPrompt = dayPicker.chefPrompt.trim() || `${CATEGORY_LABELS[activeCategory] || "Dinner"} for ${activeDay}`;
+
+    if (!activeDay || !activeCategory) {
+      return;
+    }
+
+    setDayPicker((current) => ({
+      ...current,
+      generatingAI: true,
+      aiError: "",
+    }));
+
+    try {
+      const dish = await generateSyntheticRecipe(chefPrompt, activeCategory);
+      setCustomCodex((current) => mergeDishCatalog(current, [dish]));
+      setDishCatalog((current) => mergeDishCatalog(current, [dish]));
+      applyDayDishSelection(activeDay, dish);
+    } catch (error) {
+      setDayPicker((current) => ({
+        ...current,
+        generatingAI: false,
+        aiError: error.message || "Gemini Chef could not create a recipe right now.",
+      }));
+    }
   }
 
   function clearDayDishSelection(dayName) {
@@ -1388,13 +1433,14 @@ function App() {
             {selectedDayEntries.length ? (
               <div className="recipe-grid">
                 {selectedDayEntries.map((entry) => (
-                  <article key={`${entry.dayKey}-recipe`} className="recipe-card">
+                  <article key={`${entry.dayKey}-recipe`} className={`recipe-card ${entry.dish.meta?.isAI ? "recipe-card-ai" : ""}`}>
                     <div className="recipe-card-head">
                       <div>
                         <span className="recipe-day">{entry.dayName} • {entry.shortDate}</span>
                         <h3>{entry.dish.name}</h3>
                       </div>
                       <div className="recipe-meta">
+                        {entry.dish.meta?.isAI ? <span className="chip chip-bespoke">Bespoke AI</span> : null}
                         <span className="chip chip-primary">{CATEGORY_LABELS[entry.category]}</span>
                         <span className="chip">{entry.dish.time} min</span>
                         <span className="chip">{formatCalories(estimateDishCalories(entry.dish))} cal</span>
@@ -1408,7 +1454,7 @@ function App() {
                         <strong>Ingredients</strong>
                         <ul className="recipe-ingredient-list">
                           {(entry.dish.ingredients || []).map((ingredient, index) => (
-                            <li key={`${entry.dish.id}-ingredient-${index}`}>{formatIngredientLine(ingredient)}</li>
+                            <li key={`${entry.dish.id}-ingredient-${index}`}>{formatIngredientDisplay(ingredient)}</li>
                           ))}
                         </ul>
                       </div>
@@ -2026,7 +2072,7 @@ function App() {
             </div>
             <button
               className="text-button"
-              onClick={() => setDayPicker({ dayName: "", category: "", options: [], loading: false, error: "" })}
+              onClick={() => setDayPicker(createEmptyDayPicker())}
             >
               Close
             </button>
@@ -2036,19 +2082,53 @@ function App() {
           {dayPicker.error ? <p className="empty-copy">{dayPicker.error}</p> : null}
 
           {!dayPicker.loading && !dayPicker.error ? (
-            <div className="modal-option-list">
-              {dayPicker.options.slice(0, 50).map((dish) => (
-                <div key={`${dayPicker.dayName}-${dish.id}`} className="modal-option-card">
-                  <div>
-                    <strong>{dish.name}</strong>
-                    <p>{formatCalories(estimateDishCalories(dish))} cal est. • {dish.time} min • {dish.sources[0] || "Dish Radar"}</p>
-                  </div>
-                  <button className="action-button" onClick={() => applyDayDishSelection(dayPicker.dayName, dish)}>
-                    Select
+            <>
+              {dayPicker.options.length ? (
+                <div className="modal-option-list">
+                  {dayPicker.options.slice(0, 50).map((dish) => (
+                    <div key={`${dayPicker.dayName}-${dish.id}`} className={`modal-option-card ${dish.meta?.isAI ? "modal-option-card-ai" : ""}`}>
+                      <div>
+                        <strong>{dish.name}</strong>
+                        <p>{formatCalories(estimateDishCalories(dish))} cal est. • {dish.time} min • {dish.sources[0] || "Dish Radar"}</p>
+                      </div>
+                      <div className="modal-option-actions">
+                        {dish.meta?.isAI ? <span className="chip chip-bespoke">Bespoke AI</span> : null}
+                        <button className="action-button" onClick={() => applyDayDishSelection(dayPicker.dayName, dish)}>
+                          Select
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="empty-copy">No direct matches landed for this meal type yet.</p>
+              )}
+
+              <div className={`chef-fallback-card ${dayPicker.options.length ? "" : "chef-fallback-card-prominent"}`}>
+                <div className="chef-fallback-copy">
+                  <span className="eyebrow">Gemini Chef</span>
+                  <strong>{dayPicker.options.length ? "Want something custom?" : "Ask Gemini Chef to create this"}</strong>
+                  <p>
+                    {dayPicker.options.length
+                      ? "Describe a bespoke dish and I’ll create a polished recipe that drops straight into your pantry and grocery flow."
+                      : "No direct matches came back, so Gemini Chef can create a custom dish for this day and save it in your personal library."}
+                  </p>
+                </div>
+                <div className="chef-fallback-controls">
+                  <input
+                    className="table-input chef-prompt-input"
+                    type="text"
+                    placeholder="Miso glazed sea bass"
+                    value={dayPicker.chefPrompt}
+                    onChange={(event) => setDayPicker((current) => ({ ...current, chefPrompt: event.target.value, aiError: "" }))}
+                  />
+                  <button className="action-button" onClick={handleGenerateSyntheticDish} disabled={dayPicker.generatingAI}>
+                    {dayPicker.generatingAI ? "Creating..." : "Ask Gemini Chef"}
                   </button>
                 </div>
-              ))}
-            </div>
+                {dayPicker.aiError ? <p className="empty-copy">{dayPicker.aiError}</p> : null}
+              </div>
+            </>
           ) : null}
         </div>
       </div>
