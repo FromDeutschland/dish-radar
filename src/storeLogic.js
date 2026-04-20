@@ -1254,7 +1254,7 @@ export async function generateSyntheticRecipe(prompt, category = "balanced-plate
   return normalizeSyntheticRecipe(payload, category, prompt);
 }
 
-export async function generateSyntheticRecipeCollection(prompt, category = "balanced-plate", count = 6) {
+export async function generateSyntheticRecipeCollection(prompt, category = "balanced-plate", count = 20) {
   const payload = await callGeminiChefApi({
     mode: "collection",
     prompt,

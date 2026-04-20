@@ -3,16 +3,13 @@ import {
   buildGoogleSheetPayload,
   createShoppingPlan,
   estimateDishCalories,
-  fetchDishOptions,
-  fetchRecipeDatabaseMeta,
   formatCalories,
   formatCurrency,
   formatIngredientDisplay,
   generateSyntheticRecipeCollection,
-  getDishLibrarySnapshot,
-  INGREDIENT_LIBRARY_UPDATED_AT,
   pushShoppingPlanToGoogleSheet,
   sanitizeStoredDishes,
+  extractPreferenceKeywords,
 } from "./storeLogic";
 
 const STORAGE_KEYS = {
@@ -67,7 +64,7 @@ const PANTRY_STATUSES = [
 const WORKFLOW_STEPS = [
   "1. Pick meal types for the week.",
   "2. Choose a dish type for a day.",
-  "3. Pick that day’s dish from 50 matching options.",
+  "3. Pick that day’s dish from 20 Gemini Chef options.",
   "4. Tap Ready to shop to review what was actually made last week.",
   "5. Open Grocery List and confirm Go Shop to update pantry leftovers and export the list.",
 ];
@@ -90,10 +87,6 @@ function normalizeIngredient(value) {
   return `${value || ""}`.toLowerCase().trim().replace(/[^a-z0-9]+/g, " ");
 }
 
-function normalizeSearchText(value) {
-  return `${value || ""}`.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
 function ingredientKey(ingredientId, ingredientName, unit) {
   return `${ingredientId || normalizeIngredient(ingredientName)}::${unit || ""}`;
 }
@@ -104,6 +97,23 @@ function roundAmount(value) {
 
 function formatAmount(value) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function buildGeminiPrompt({ category, dayName, searchText, biasKeywords }) {
+  const parts = [];
+
+  if (searchText?.trim()) {
+    parts.push(searchText.trim());
+  } else {
+    parts.push(`20 ${CATEGORY_LABELS[category] || "fun dinner"} ideas for ${dayName}`);
+  }
+
+  if (biasKeywords.length) {
+    parts.push(`Use these preference hints from prior ratings when appropriate: ${biasKeywords.join(", ")}`);
+  }
+
+  parts.push("Keep the dishes varied, practical, and distinct from each other.");
+  return parts.join(". ");
 }
 
 function getSavedActiveTab() {
@@ -367,7 +377,6 @@ function App() {
   const [pantryStockDraft, setPantryStockDraft] = useState({ ingredient: "", amount: "1", unit: "jar", category: "pantry" });
   const [fetchState, setFetchState] = useState({ error: "", biasKeywords: [], exportMessage: "" });
   const [helpOpen, setHelpOpen] = useState(false);
-  const [recipeDatabaseMeta, setRecipeDatabaseMeta] = useState(null);
   const [selectedArchiveId, setSelectedArchiveId] = useState(null);
   const [reviewModal, setReviewModal] = useState({ open: false, records: [] });
   const [dayPicker, setDayPicker] = useState(() => createEmptyDayPicker());
@@ -383,6 +392,7 @@ function App() {
     () => Array.from(new Map([...customCodex, ...dishCatalog].map((dish) => [dish.id, dish])).values()),
     [customCodex, dishCatalog],
   );
+  const biasKeywords = useMemo(() => extractPreferenceKeywords(ratingHistory), [ratingHistory]);
   const selectedDayEntries = weekDays
     .map((day) => {
       const dishId = dayDishSelections[day.key];
@@ -423,7 +433,6 @@ function App() {
       .slice(0, 4)
       .map(([source, count]) => ({ source, count }));
   }, [selectedDayEntries]);
-  const baseDishLibrary = useMemo(() => getDishLibrarySnapshot([]), []);
   const pantryInventoryLookup = useMemo(
     () => new Map(pantryInventory.map((item) => [ingredientKey(item.ingredientId, item.ingredient, item.unit), item])),
     [pantryInventory],
@@ -494,9 +503,14 @@ function App() {
       .sort((left, right) => right.average - left.average || right.count - left.count)
       .slice(0, 5);
     const uniqueIngredients = new Set(
-      baseDishLibrary.flatMap((dish) => (dish.ingredients || []).map((ingredient) => normalizeIngredient(ingredient.name))),
+      searchableDishLibrary.flatMap((dish) => (dish.ingredients || []).map((ingredient) => normalizeIngredient(ingredient.name))),
     );
     const lastArchive = archivedLists[0];
+    const lastGeneratedAt = searchableDishLibrary
+      .map((dish) => dish.meta?.generatedAt)
+      .filter(Boolean)
+      .sort()
+      .slice(-1)[0] || "";
 
     return {
       weeksShopped: archivedLists.length,
@@ -511,16 +525,16 @@ function App() {
       topStore: Object.entries(storeCounts).sort((left, right) => right[1] - left[1])[0]?.[0] || "None yet",
       pendingReviews: triedDishes.length,
       pantryLines: pantryInventory.length + manualPantryItems.length,
-      totalLibraryDishes: recipeDatabaseMeta?.totalDishCount || baseDishLibrary.length,
-      totalLibraryIngredients: recipeDatabaseMeta?.uniqueIngredientCount || uniqueIngredients.size,
-      lastIngredientUpdate: recipeDatabaseMeta?.generatedAt || INGREDIENT_LIBRARY_UPDATED_AT,
+      totalLibraryDishes: searchableDishLibrary.length,
+      totalLibraryIngredients: uniqueIngredients.size,
+      lastIngredientUpdate: lastGeneratedAt ? lastGeneratedAt.slice(0, 10) : "Gemini live",
       topDishes,
       recentRatings: ratedRecords
         .slice()
         .sort((left, right) => new Date(right.confirmedAt).getTime() - new Date(left.confirmedAt).getTime())
         .slice(0, 6),
     };
-  }, [archivedLists, baseDishLibrary, manualPantryItems.length, pantryInventory.length, ratingHistory, recipeDatabaseMeta, triedDishes.length]);
+  }, [archivedLists, manualPantryItems.length, pantryInventory.length, ratingHistory, searchableDishLibrary, triedDishes.length]);
 
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.activeTab, JSON.stringify(activeTab));
@@ -569,26 +583,6 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.ratingHistory, JSON.stringify(ratingHistory));
   }, [ratingHistory]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    fetchRecipeDatabaseMeta()
-      .then((metadata) => {
-        if (!cancelled) {
-          setRecipeDatabaseMeta(metadata);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setRecipeDatabaseMeta(null);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     setWishlistIds((current) => current.filter((id) => dishLookup[id]));
@@ -651,30 +645,30 @@ function App() {
     setFetchState((current) => ({ ...current, error: "", exportMessage: "" }));
 
     try {
-      const result = await fetchDishOptions({
-        categories: [category],
-        triedDishes: ratingHistory,
-        limit: 50,
-        customRecipes: customCodex,
-      });
+      const dishes = await generateSyntheticRecipeCollection(
+        buildGeminiPrompt({ category, dayName, searchText: "", biasKeywords }),
+        category,
+        20,
+      );
 
-      setDishCatalog((current) => mergeDishCatalog(current, result.dishes));
+      setCustomCodex((current) => mergeDishCatalog(current, dishes));
+      setDishCatalog((current) => mergeDishCatalog(current, dishes));
       setDayPicker({
         ...createEmptyDayPicker(),
         dayName,
         category,
-        options: result.dishes.filter((dish) => getDishCategory(dish) === category),
+        curatedOptions: dishes,
       });
       setFetchState((current) => ({
         ...current,
-        biasKeywords: result.biasKeywords || current.biasKeywords,
+        biasKeywords,
       }));
     } catch (error) {
       setDayPicker({
         ...createEmptyDayPicker(),
         dayName,
         category,
-        error: error.message || "Unable to load day-specific dish options right now.",
+        error: error.message || "Gemini Chef could not load dishes right now.",
       });
     }
   }
@@ -709,7 +703,12 @@ function App() {
   async function handleCurateGeminiDishes() {
     const activeDay = dayPicker.dayName;
     const activeCategory = dayPicker.category;
-    const searchQuery = dayPicker.searchQuery.trim() || `${CATEGORY_LABELS[activeCategory] || "Dinner"} for ${activeDay}`;
+    const searchQuery = buildGeminiPrompt({
+      category: activeCategory,
+      dayName: activeDay,
+      searchText: dayPicker.searchQuery.trim(),
+      biasKeywords,
+    });
 
     if (!activeDay || !activeCategory) {
       return;
@@ -723,7 +722,7 @@ function App() {
     }));
 
     try {
-      const dishes = await generateSyntheticRecipeCollection(searchQuery, activeCategory, 6);
+      const dishes = await generateSyntheticRecipeCollection(searchQuery, activeCategory, 20);
       setCustomCodex((current) => mergeDishCatalog(current, dishes));
       setDishCatalog((current) => mergeDishCatalog(current, dishes));
       setDayPicker((current) => ({
@@ -734,35 +733,12 @@ function App() {
         aiNotice: "Fresh Gemini Chef curations are ready.",
       }));
     } catch (error) {
-      const fallbackMatches = searchableDishLibrary
-        .filter((dish) => getDishCategory(dish) === activeCategory)
-        .map((dish) => {
-          const haystack = normalizeSearchText([
-            dish.name,
-            dish.trendNote,
-            ...(dish.tags || []),
-            ...(dish.cuisines || []),
-            ...(dish.sources || []),
-          ].join(" "));
-          const query = normalizeSearchText(searchQuery);
-          const queryTokens = query.split(/\s+/).filter(Boolean);
-          const score = queryTokens.reduce((total, token) => total + (haystack.includes(token) ? 1 : 0), 0)
-            + (haystack.includes(query) && query ? 3 : 0);
-          return { dish, score };
-        })
-        .filter((entry) => entry.score > 0)
-        .sort((left, right) => right.score - left.score || left.dish.name.localeCompare(right.dish.name))
-        .slice(0, 6)
-        .map((entry) => entry.dish);
-
       setDayPicker((current) => ({
         ...current,
         generatingAI: false,
-        curatedOptions: fallbackMatches,
         aiError: "",
-        aiNotice: fallbackMatches.length
-          ? "Gemini Chef is busy right now, so these closest category matches are being shown instead."
-          : "Gemini Chef is busy right now. Please try again in a few seconds.",
+        aiNotice: "",
+        error: error.message || "Gemini Chef is busy right now. Please try again in a few seconds.",
       }));
     }
   }
@@ -1200,7 +1176,7 @@ function App() {
               <div className="summary-box">
                 <strong>
                   {dayPicker.loading
-                    ? `Loading 50 ${CATEGORY_LABELS[dayPicker.category] || ""} options for ${dayPicker.dayName}...`
+                    ? `Gemini Chef is generating 20 ${CATEGORY_LABELS[dayPicker.category] || ""} dishes for ${dayPicker.dayName}...`
                     : selectedDayEntries.length
                       ? `${selectedDayEntries.length} days have a chosen dish`
                       : selectedCategories.length
@@ -1209,8 +1185,8 @@ function App() {
                 </strong>
                 <span>
                   {fetchState.biasKeywords.length
-                    ? `Next fetch is being biased toward: ${fetchState.biasKeywords.join(", ")}.`
-                    : "Ratings from your weekly review shape future dish options toward similar cuisines and flavors."}
+                    ? `Gemini Chef is being guided by these preference cues: ${fetchState.biasKeywords.join(", ")}.`
+                    : "Ratings from your weekly review shape future Gemini Chef dish suggestions toward similar cuisines and flavors."}
                 </span>
               </div>
             </div>
@@ -1227,13 +1203,13 @@ function App() {
           <div className="info-strip">
             <p>
               {selectedCategories.length
-                ? "Selecting a dish type now automatically opens a 50-option picker for that day."
+                ? "Selecting a dish type now automatically opens a Gemini Chef picker with 20 dishes for that day."
                 : "Choose one or more meal types above to start building your week day by day."}
             </p>
             <p>
               {sourceMix.length
                 ? `Current chosen dishes come from: ${sourceMix.map((item) => `${item.source} (${item.count})`).join(", ")}.`
-                : "Day pickers now use TheMealDB for recipes, ingredients, and cooking instructions."}
+                : "Day pickers now use Gemini Chef only for dish generation, ingredients, and cooking instructions."}
             </p>
             {fetchState.error ? <p>{fetchState.error}</p> : null}
           </div>
@@ -1262,7 +1238,7 @@ function App() {
               </div>
             ) : (
               <p className="empty-copy">
-                Pick a meal type for a day, then choose one recipe from the 50 matching options shown for that day.
+                Pick a meal type for a day, then choose one recipe from the 20 Gemini Chef dishes generated for that day.
               </p>
             )}
 
@@ -2120,7 +2096,7 @@ function App() {
             </button>
           </div>
 
-          {dayPicker.loading ? <p className="empty-copy">Loading 50 matching options for this day...</p> : null}
+          {dayPicker.loading ? <p className="empty-copy">Gemini Chef is generating 20 dishes for this day...</p> : null}
           {dayPicker.error ? <p className="empty-copy">{dayPicker.error}</p> : null}
 
           {!dayPicker.loading && !dayPicker.error ? (
@@ -2129,7 +2105,7 @@ function App() {
                 <div className="chef-search-copy">
                   <span className="eyebrow">Search with Gemini Chef</span>
                   <strong>Type a vibe, ingredient, or craving and get curated dishes back</strong>
-                  <p className="chef-search-note">If Gemini Chef is busy, Dish Radar now retries automatically before showing an error.</p>
+                  <p className="chef-search-note">Each Gemini Chef request now returns 20 dishes for this meal type.</p>
                 </div>
                 <div className="chef-fallback-controls">
                   <input
@@ -2172,35 +2148,14 @@ function App() {
                 </div>
               ) : null}
 
-              {dayPicker.options.length ? (
-                <div className="modal-option-list">
-                  {dayPicker.options.slice(0, 50).map((dish) => (
-                    <div key={`${dayPicker.dayName}-${dish.id}`} className={`modal-option-card ${dish.meta?.isAI ? "modal-option-card-ai" : ""}`}>
-                      <div>
-                        <strong>{dish.name}</strong>
-                        <p>{formatCalories(estimateDishCalories(dish))} cal est. • {dish.time} min • {dish.sources[0] || "Dish Radar"}</p>
-                      </div>
-                      <div className="modal-option-actions">
-                        {dish.meta?.isAI ? <span className="chip chip-bespoke">Bespoke AI</span> : null}
-                        <button className="action-button" onClick={() => applyDayDishSelection(dayPicker.dayName, dish)}>
-                          Select
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="empty-copy">No direct matches landed for this meal type yet.</p>
-              )}
-
-              <div className={`chef-fallback-card ${dayPicker.options.length ? "" : "chef-fallback-card-prominent"}`}>
+              <div className={`chef-fallback-card ${dayPicker.curatedOptions.length ? "" : "chef-fallback-card-prominent"}`}>
                 <div className="chef-fallback-copy">
                   <span className="eyebrow">Gemini Chef</span>
-                  <strong>{dayPicker.options.length ? "Need something more specific?" : "Let Gemini Chef build your options"}</strong>
+                  <strong>{dayPicker.curatedOptions.length ? "Need something more specific?" : "Let Gemini Chef build your dishes"}</strong>
                   <p>
-                    {dayPicker.options.length
-                      ? "Use the search above to get a custom set of polished dishes that still drop straight into pantry and grocery planning."
-                      : "No direct matches came back, so use the search above and Gemini Chef will curate custom dish options for this day and save them in your personal library."}
+                    {dayPicker.curatedOptions.length
+                      ? "Use the search above to get a fresh set of 20 polished dishes that still drop straight into pantry and grocery planning."
+                      : "Use the search above and Gemini Chef will curate 20 custom dish options for this day and save them in your personal library."}
                   </p>
                 </div>
               </div>
@@ -2304,7 +2259,7 @@ function App() {
             </button>
           </div>
 
-          <p className="empty-copy">Plan dishes from TheMealDB, confirm shopping, and keep pantry leftovers until fully consumed.</p>
+          <p className="empty-copy">Plan dishes with Gemini Chef, confirm shopping, and keep pantry leftovers until fully consumed.</p>
 
           <ol className="workflow-list help-workflow-list">
             {WORKFLOW_STEPS.map((step) => (
