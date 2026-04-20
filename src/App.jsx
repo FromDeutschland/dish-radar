@@ -90,6 +90,10 @@ function normalizeIngredient(value) {
   return `${value || ""}`.toLowerCase().trim().replace(/[^a-z0-9]+/g, " ");
 }
 
+function normalizeSearchText(value) {
+  return `${value || ""}`.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function ingredientKey(ingredientId, ingredientName, unit) {
   return `${ingredientId || normalizeIngredient(ingredientName)}::${unit || ""}`;
 }
@@ -342,6 +346,7 @@ function createEmptyDayPicker() {
     searchQuery: "",
     generatingAI: false,
     aiError: "",
+    aiNotice: "",
   };
 }
 
@@ -373,6 +378,10 @@ function App() {
   const dishLookup = useMemo(
     () => Object.fromEntries(dishCatalog.map((dish) => [dish.id, dish])),
     [dishCatalog],
+  );
+  const searchableDishLibrary = useMemo(
+    () => Array.from(new Map([...customCodex, ...dishCatalog].map((dish) => [dish.id, dish])).values()),
+    [customCodex, dishCatalog],
   );
   const selectedDayEntries = weekDays
     .map((day) => {
@@ -710,6 +719,7 @@ function App() {
       ...current,
       generatingAI: true,
       aiError: "",
+      aiNotice: "",
     }));
 
     try {
@@ -721,12 +731,38 @@ function App() {
         curatedOptions: dishes,
         generatingAI: false,
         aiError: "",
+        aiNotice: "Fresh Gemini Chef curations are ready.",
       }));
     } catch (error) {
+      const fallbackMatches = searchableDishLibrary
+        .filter((dish) => getDishCategory(dish) === activeCategory)
+        .map((dish) => {
+          const haystack = normalizeSearchText([
+            dish.name,
+            dish.trendNote,
+            ...(dish.tags || []),
+            ...(dish.cuisines || []),
+            ...(dish.sources || []),
+          ].join(" "));
+          const query = normalizeSearchText(searchQuery);
+          const queryTokens = query.split(/\s+/).filter(Boolean);
+          const score = queryTokens.reduce((total, token) => total + (haystack.includes(token) ? 1 : 0), 0)
+            + (haystack.includes(query) && query ? 3 : 0);
+          return { dish, score };
+        })
+        .filter((entry) => entry.score > 0)
+        .sort((left, right) => right.score - left.score || left.dish.name.localeCompare(right.dish.name))
+        .slice(0, 6)
+        .map((entry) => entry.dish);
+
       setDayPicker((current) => ({
         ...current,
         generatingAI: false,
-        aiError: error.message || "Gemini Chef could not curate dishes right now.",
+        curatedOptions: fallbackMatches,
+        aiError: "",
+        aiNotice: fallbackMatches.length
+          ? "Gemini Chef is busy right now, so these closest category matches are being shown instead."
+          : "Gemini Chef is busy right now. Please try again in a few seconds.",
       }));
     }
   }
@@ -2107,6 +2143,7 @@ function App() {
                     {dayPicker.generatingAI ? "Curating..." : "Curate with Gemini"}
                   </button>
                 </div>
+                {dayPicker.aiNotice ? <p className="chef-search-status">{dayPicker.aiNotice}</p> : null}
                 {dayPicker.aiError ? <p className="empty-copy">{dayPicker.aiError}</p> : null}
               </div>
 

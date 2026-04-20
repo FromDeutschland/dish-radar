@@ -831,6 +831,13 @@ th {
   color: var(--ink-muted);
 }
 
+.chef-search-status {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: #7c5b2a;
+}
+
 .chef-fallback-copy {
   display: grid;
   gap: 4px;
