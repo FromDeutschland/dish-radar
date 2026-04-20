@@ -166,6 +166,131 @@ const UNICODE_FRACTIONS = {
   "⅞": 0.875,
 };
 
+const DESCRIPTOR_UNITS = new Set([
+  "chopped",
+  "diced",
+  "sliced",
+  "minced",
+  "grated",
+  "large",
+  "small",
+  "medium",
+  "beaten",
+  "juiced",
+  "juice",
+  "to serve",
+  "to garnish",
+  "for garnish",
+  "fresh",
+  "ripe",
+  "peeled",
+  "halved",
+  "crushed",
+]);
+
+const PACKAGE_EQUIVALENTS = {
+  g: {
+    produce: 150,
+    pantry: 400,
+    dairy: 200,
+    protein: 454,
+    seafood: 454,
+    specialty: 120,
+    bakery: 250,
+    frozen: 400,
+  },
+  kg: {
+    produce: 1,
+    pantry: 1,
+    dairy: 1,
+    protein: 1,
+    seafood: 1,
+    specialty: 1,
+    bakery: 1,
+    frozen: 1,
+  },
+  ml: {
+    pantry: 500,
+    dairy: 240,
+    specialty: 240,
+    produce: 240,
+    protein: 240,
+    seafood: 240,
+    bakery: 240,
+    frozen: 240,
+  },
+  l: {
+    pantry: 1,
+    dairy: 1,
+    specialty: 1,
+    produce: 1,
+    protein: 1,
+    seafood: 1,
+    bakery: 1,
+    frozen: 1,
+  },
+  oz: {
+    pantry: 16,
+    dairy: 8,
+    protein: 16,
+    seafood: 16,
+    specialty: 8,
+    produce: 8,
+    bakery: 8,
+    frozen: 16,
+  },
+  lb: {
+    pantry: 1,
+    dairy: 1,
+    protein: 1,
+    seafood: 1,
+    specialty: 1,
+    produce: 1,
+    bakery: 1,
+    frozen: 1,
+  },
+  tbsp: {
+    pantry: 16,
+    dairy: 16,
+    specialty: 12,
+    produce: 8,
+    protein: 8,
+    seafood: 8,
+    bakery: 8,
+    frozen: 8,
+  },
+  tsp: {
+    pantry: 48,
+    dairy: 48,
+    specialty: 36,
+    produce: 24,
+    protein: 24,
+    seafood: 24,
+    bakery: 24,
+    frozen: 24,
+  },
+  clove: {
+    produce: 6,
+  },
+  handful: {
+    produce: 2,
+    pantry: 4,
+  },
+  bunch: {
+    produce: 1,
+  },
+  piece: {
+    produce: 1,
+    protein: 1,
+    seafood: 1,
+    dairy: 1,
+    pantry: 1,
+    specialty: 1,
+    bakery: 1,
+    frozen: 1,
+  },
+};
+
 let mealLibraryPromise;
 let mealLibraryCache = [];
 let recipeDatabaseMetaPromise;
@@ -226,16 +351,25 @@ function parseFractionToken(token) {
 
 function cleanMeasure(value) {
   const normalized = normalizeText(value);
-  if (!normalized || normalized === "to taste") {
+  if (!normalized || normalized === "to taste" || /^\d+(\.\d+)?$/.test(normalized)) {
     return "piece";
   }
+  if (/^g(ram)?s?$/.test(normalized)) return "g";
+  if (/^kg|kilogram/.test(normalized)) return "kg";
+  if (/^ml$|millilit/.test(normalized)) return "ml";
+  if (/^l$|litre|liter/.test(normalized)) return "l";
   if (normalized.includes("ounce")) return "oz";
   if (normalized.includes("pound")) return "lb";
   if (normalized.includes("cup")) return "cup";
-  if (normalized.includes("tablespoon")) return "tbsp";
-  if (normalized.includes("teaspoon")) return "tsp";
+  if (normalized.includes("tablespoon") || normalized === "tbsp" || normalized === "tblsp" || normalized === "tbs") return "tbsp";
+  if (normalized.includes("teaspoon") || normalized === "tsp") return "tsp";
   if (normalized.includes("slice")) return "slice";
   if (normalized.includes("clove")) return "clove";
+  if (normalized.includes("handful")) return "handful";
+  if (normalized.includes("bunch")) return "bunch";
+  if (normalized.includes("leaves") || normalized.includes("sprig")) return "bunch";
+  if (normalized.includes("juice")) return "piece";
+  if (DESCRIPTOR_UNITS.has(normalized)) return "piece";
   return normalized.replace(/[^a-z0-9]+/g, " ").trim() || "piece";
 }
 
@@ -245,7 +379,9 @@ function parseMeasureValue(measure) {
     return { amount: 1, unit: "piece" };
   }
 
-  const tokens = normalized.split(/\s+/);
+  const compactMatch = normalized.match(/^(\d+(?:\.\d+)?)([a-zA-Z].*)$/);
+  const prepared = compactMatch ? `${compactMatch[1]} ${compactMatch[2]}` : normalized;
+  const tokens = prepared.split(/\s+/);
   let amount = 0;
   let consumed = 0;
 
@@ -261,8 +397,29 @@ function parseMeasureValue(measure) {
   const remainder = tokens.slice(consumed).join(" ").trim();
   return {
     amount: amount > 0 ? Math.round(amount * 10) / 10 : 1,
-    unit: cleanMeasure(remainder || normalized),
+    unit: cleanMeasure(remainder || prepared),
   };
+}
+
+function normalizeShoppingAmount(amount, unit, category) {
+  const categoryMap = PACKAGE_EQUIVALENTS[unit];
+  if (!categoryMap) {
+    return amount;
+  }
+
+  const divisor = categoryMap[category] || categoryMap.pantry || categoryMap.produce || 1;
+  const normalized = amount / divisor;
+  return Math.max(normalized, 0.1);
+}
+
+function formatShoppingQty(amount, unit) {
+  if (unit === "g" || unit === "ml") {
+    return `${Math.round(amount)} ${unit}`;
+  }
+  if (unit === "kg" || unit === "l") {
+    return `${amount % 1 === 0 ? amount : amount.toFixed(1)} ${unit}`;
+  }
+  return formatQty(amount, unit);
 }
 
 function inferIngredientCategoryFromName(name) {
@@ -328,6 +485,7 @@ function aggregateIngredients(dishes) {
         ingredientId: ingredient.id || "",
         ingredient: ingredient.name,
         amount: 0,
+        shoppingAmount: 0,
         unit: ingredient.unit,
         category: ingredient.category,
         basePrice: ingredient.basePrice,
@@ -335,6 +493,7 @@ function aggregateIngredients(dishes) {
       };
 
       existing.amount += ingredient.amount;
+      existing.shoppingAmount += normalizeShoppingAmount(ingredient.amount, ingredient.unit, ingredient.category);
       existing.basePrice = ingredient.basePrice;
       if (!existing.dishes.includes(dish.name)) {
         existing.dishes.push(dish.name);
@@ -382,7 +541,7 @@ function estimateStore(store, rows, wishlistSize) {
 
     const priceMultiplier = store.pricing[row.category] ?? 1;
     const coverage = store.coverage[row.category] ?? 0.8;
-    const rowCost = row.amount * row.basePrice * priceMultiplier;
+    const rowCost = row.shoppingAmount * row.basePrice * priceMultiplier;
     const coveragePenalty = (1 - coverage) * rowCost * 2.2;
 
     estimatedTotal += rowCost + coveragePenalty;
@@ -420,8 +579,8 @@ export function createShoppingPlan(dishes) {
   const rows = aggregatedRows.map((row) => ({
     ingredientId: row.ingredientId,
     ingredient: row.ingredient,
-    qty: formatQty(row.amount, row.unit),
-    expectedPrice: row.amount * row.basePrice * (recommendedStore.pricing[row.category] ?? 1),
+    qty: formatShoppingQty(row.amount, row.unit),
+    expectedPrice: row.shoppingAmount * row.basePrice * (recommendedStore.pricing[row.category] ?? 1),
     dishUsedIn: row.dishes.join(", "),
     category: row.category,
   }));
@@ -431,6 +590,7 @@ export function createShoppingPlan(dishes) {
       ingredientId: row.ingredientId,
       ingredient: row.ingredient,
       amount: row.amount,
+      shoppingAmount: row.shoppingAmount,
       unit: row.unit,
       category: row.category,
       basePrice: row.basePrice,
