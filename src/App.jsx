@@ -28,6 +28,7 @@ const STORAGE_KEYS = {
 
 const TABS = [
   { value: "planner", label: "Dish Planner" },
+  { value: "recipes", label: "Recipes" },
   { value: "groceries", label: "Grocery List" },
   { value: "pantry", label: "Pantry" },
   { value: "grocery-lists", label: "Grocery Lists" },
@@ -95,6 +96,12 @@ function roundAmount(value) {
 
 function formatAmount(value) {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, "");
+}
+
+function formatIngredientLine(ingredient) {
+  const amount = ingredient.amount ? formatAmount(ingredient.amount) : "";
+  const unit = ingredient.unit || "";
+  return [amount, unit, ingredient.name].filter(Boolean).join(" ");
 }
 
 function getSavedActiveTab() {
@@ -1366,6 +1373,78 @@ function App() {
     );
   }
 
+  function renderRecipesTab() {
+    return (
+      <div className="workspace single-column-layout">
+        <section className="main-column">
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <div className="eyebrow">Recipes</div>
+                <h2>This week’s selected dishes, ready for cooking</h2>
+              </div>
+            </div>
+
+            {selectedDayEntries.length ? (
+              <div className="recipe-grid">
+                {selectedDayEntries.map((entry) => (
+                  <article key={`${entry.dayKey}-recipe`} className="recipe-card">
+                    <div className="recipe-card-head">
+                      <div>
+                        <span className="recipe-day">{entry.dayName} • {entry.shortDate}</span>
+                        <h3>{entry.dish.name}</h3>
+                      </div>
+                      <div className="recipe-meta">
+                        <span className="chip chip-primary">{CATEGORY_LABELS[entry.category]}</span>
+                        <span className="chip">{entry.dish.time} min</span>
+                        <span className="chip">{formatCalories(estimateDishCalories(entry.dish))} cal</span>
+                      </div>
+                    </div>
+
+                    <p className="recipe-note">{entry.dish.trendNote}</p>
+
+                    <div className="recipe-columns">
+                      <div className="recipe-block">
+                        <strong>Ingredients</strong>
+                        <ul className="recipe-ingredient-list">
+                          {(entry.dish.ingredients || []).map((ingredient, index) => (
+                            <li key={`${entry.dish.id}-ingredient-${index}`}>{formatIngredientLine(ingredient)}</li>
+                          ))}
+                        </ul>
+                      </div>
+
+                      <div className="recipe-block">
+                        <strong>Cooking snapshot</strong>
+                        <div className="recipe-facts">
+                          <div>
+                            <span>Difficulty</span>
+                            <strong>{getDifficultyLabel(entry.dish.time)}</strong>
+                          </div>
+                          <div>
+                            <span>Sources</span>
+                            <strong>{(entry.dish.sources || []).join(" • ")}</strong>
+                          </div>
+                          <div>
+                            <span>Flavor tags</span>
+                            <strong>{(entry.dish.tags || []).join(", ") || "Seasonal pick"}</strong>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-copy">
+                Choose dishes in <strong>Dish Planner</strong> and they’ll appear here in a clean weekly cooking view.
+              </p>
+            )}
+          </section>
+        </section>
+      </div>
+    );
+  }
+
   function renderPantryTab() {
     return (
       <div className="workspace pantry-layout">
@@ -2096,27 +2175,8 @@ function App() {
       </header>
 
       <main className="content-shell">
-        {activeTab === "planner" ? (
-          <section className="intro-hero">
-            <div className="hero-copy">
-              <span className="eyebrow">Weekly planning atelier</span>
-              <h1>Plan beautifully. Shop once. Remember what is already at home.</h1>
-              <p>
-                Select a dish style for each day, lock in exact recipes, keep pantry leftovers live,
-                and edit every archived grocery run whenever you need to.
-              </p>
-            </div>
-            <div className="hero-frame" aria-hidden="true">
-              <div className="hero-arch">
-                <div className="hero-arch-lines" />
-                <div className="hero-orb hero-orb-top" />
-                <div className="hero-orb hero-orb-bottom" />
-              </div>
-            </div>
-          </section>
-        ) : null}
-
         {activeTab === "planner" ? renderPlannerTab() : null}
+        {activeTab === "recipes" ? renderRecipesTab() : null}
         {activeTab === "groceries" ? renderGroceriesTab() : null}
         {activeTab === "pantry" ? renderPantryTab() : null}
         {activeTab === "grocery-lists" ? renderArchivedListsTab() : null}
