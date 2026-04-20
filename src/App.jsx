@@ -8,7 +8,7 @@ import {
   formatCalories,
   formatCurrency,
   formatIngredientDisplay,
-  generateSyntheticRecipe,
+  generateSyntheticRecipeCollection,
   getDishLibrarySnapshot,
   INGREDIENT_LIBRARY_UPDATED_AT,
   pushShoppingPlanToGoogleSheet,
@@ -336,9 +336,10 @@ function createEmptyDayPicker() {
     dayName: "",
     category: "",
     options: [],
+    curatedOptions: [],
     loading: false,
     error: "",
-    chefPrompt: "",
+    searchQuery: "",
     generatingAI: false,
     aiError: "",
   };
@@ -696,10 +697,10 @@ function App() {
     setDayPicker(createEmptyDayPicker());
   }
 
-  async function handleGenerateSyntheticDish() {
+  async function handleCurateGeminiDishes() {
     const activeDay = dayPicker.dayName;
     const activeCategory = dayPicker.category;
-    const chefPrompt = dayPicker.chefPrompt.trim() || `${CATEGORY_LABELS[activeCategory] || "Dinner"} for ${activeDay}`;
+    const searchQuery = dayPicker.searchQuery.trim() || `${CATEGORY_LABELS[activeCategory] || "Dinner"} for ${activeDay}`;
 
     if (!activeDay || !activeCategory) {
       return;
@@ -712,15 +713,20 @@ function App() {
     }));
 
     try {
-      const dish = await generateSyntheticRecipe(chefPrompt, activeCategory);
-      setCustomCodex((current) => mergeDishCatalog(current, [dish]));
-      setDishCatalog((current) => mergeDishCatalog(current, [dish]));
-      applyDayDishSelection(activeDay, dish);
+      const dishes = await generateSyntheticRecipeCollection(searchQuery, activeCategory, 6);
+      setCustomCodex((current) => mergeDishCatalog(current, dishes));
+      setDishCatalog((current) => mergeDishCatalog(current, dishes));
+      setDayPicker((current) => ({
+        ...current,
+        curatedOptions: dishes,
+        generatingAI: false,
+        aiError: "",
+      }));
     } catch (error) {
       setDayPicker((current) => ({
         ...current,
         generatingAI: false,
-        aiError: error.message || "Gemini Chef could not create a recipe right now.",
+        aiError: error.message || "Gemini Chef could not curate dishes right now.",
       }));
     }
   }
@@ -2083,6 +2089,51 @@ function App() {
 
           {!dayPicker.loading && !dayPicker.error ? (
             <>
+              <div className="chef-search-bar">
+                <div className="chef-search-copy">
+                  <span className="eyebrow">Search with Gemini Chef</span>
+                  <strong>Type a vibe, ingredient, or craving and get curated dishes back</strong>
+                </div>
+                <div className="chef-fallback-controls">
+                  <input
+                    className="table-input chef-prompt-input"
+                    type="text"
+                    placeholder="crispy salmon with spring vegetables"
+                    value={dayPicker.searchQuery}
+                    onChange={(event) => setDayPicker((current) => ({ ...current, searchQuery: event.target.value, aiError: "" }))}
+                  />
+                  <button className="action-button" onClick={handleCurateGeminiDishes} disabled={dayPicker.generatingAI}>
+                    {dayPicker.generatingAI ? "Curating..." : "Curate with Gemini"}
+                  </button>
+                </div>
+                {dayPicker.aiError ? <p className="empty-copy">{dayPicker.aiError}</p> : null}
+              </div>
+
+              {dayPicker.curatedOptions.length ? (
+                <div className="curated-section">
+                  <div className="curated-section-head">
+                    <span className="eyebrow">Gemini Chef Curations</span>
+                    <strong>Custom dishes based on your search</strong>
+                  </div>
+                  <div className="modal-option-list">
+                    {dayPicker.curatedOptions.map((dish) => (
+                      <div key={`${dayPicker.dayName}-curated-${dish.id}`} className="modal-option-card modal-option-card-ai">
+                        <div>
+                          <strong>{dish.name}</strong>
+                          <p>{formatCalories(estimateDishCalories(dish))} cal est. • {dish.time} min • {dish.sources[0] || "Gemini Chef"}</p>
+                        </div>
+                        <div className="modal-option-actions">
+                          <span className="chip chip-bespoke">Bespoke AI</span>
+                          <button className="action-button" onClick={() => applyDayDishSelection(dayPicker.dayName, dish)}>
+                            Select
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
               {dayPicker.options.length ? (
                 <div className="modal-option-list">
                   {dayPicker.options.slice(0, 50).map((dish) => (
@@ -2107,26 +2158,13 @@ function App() {
               <div className={`chef-fallback-card ${dayPicker.options.length ? "" : "chef-fallback-card-prominent"}`}>
                 <div className="chef-fallback-copy">
                   <span className="eyebrow">Gemini Chef</span>
-                  <strong>{dayPicker.options.length ? "Want something custom?" : "Ask Gemini Chef to create this"}</strong>
+                  <strong>{dayPicker.options.length ? "Need something more specific?" : "Let Gemini Chef build your options"}</strong>
                   <p>
                     {dayPicker.options.length
-                      ? "Describe a bespoke dish and I’ll create a polished recipe that drops straight into your pantry and grocery flow."
-                      : "No direct matches came back, so Gemini Chef can create a custom dish for this day and save it in your personal library."}
+                      ? "Use the search above to get a custom set of polished dishes that still drop straight into pantry and grocery planning."
+                      : "No direct matches came back, so use the search above and Gemini Chef will curate custom dish options for this day and save them in your personal library."}
                   </p>
                 </div>
-                <div className="chef-fallback-controls">
-                  <input
-                    className="table-input chef-prompt-input"
-                    type="text"
-                    placeholder="Miso glazed sea bass"
-                    value={dayPicker.chefPrompt}
-                    onChange={(event) => setDayPicker((current) => ({ ...current, chefPrompt: event.target.value, aiError: "" }))}
-                  />
-                  <button className="action-button" onClick={handleGenerateSyntheticDish} disabled={dayPicker.generatingAI}>
-                    {dayPicker.generatingAI ? "Creating..." : "Ask Gemini Chef"}
-                  </button>
-                </div>
-                {dayPicker.aiError ? <p className="empty-copy">{dayPicker.aiError}</p> : null}
               </div>
             </>
           ) : null}

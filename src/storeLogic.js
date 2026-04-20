@@ -1301,6 +1301,104 @@ export async function generateSyntheticRecipe(prompt, category = "balanced-plate
   return normalizeSyntheticRecipe(payload, category, prompt);
 }
 
+export async function generateSyntheticRecipeCollection(prompt, category = "balanced-plate", count = 6) {
+  if (!GEMINI_API_KEY) {
+    throw new Error("Gemini Chef is not configured. Add VITE_GEMINI_API_KEY to continue.");
+  }
+
+  const response = await fetch(GEMINI_BASE, {
+    method: "POST",
+    headers: {
+      "x-goog-api-key": GEMINI_API_KEY,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          parts: [
+            {
+              text: [
+                buildGeminiRecipePrompt(prompt, category),
+                `Create ${count} distinct recipe options for this prompt instead of one.`,
+                "Vary the proteins, sauces, aromatics, or produce so the dish options feel genuinely different from each other.",
+              ].join("\n"),
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseJsonSchema: {
+          type: "object",
+          properties: {
+            recipes: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  id: { type: "string" },
+                  name: { type: "string" },
+                  category: { type: "string" },
+                  instructions: { type: "string" },
+                  ingredients: {
+                    type: "array",
+                    items: { type: "string" },
+                  },
+                  meta: {
+                    type: "object",
+                    properties: {
+                      isAI: { type: "boolean" },
+                      cuisine: { type: "string" },
+                      tags: {
+                        type: "array",
+                        items: { type: "string" },
+                      },
+                      prepTimeMinutes: { type: "integer" },
+                    },
+                    required: ["isAI"],
+                  },
+                },
+                required: ["name", "category", "instructions", "ingredients", "meta"],
+              },
+            },
+          },
+          required: ["recipes"],
+        },
+      },
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`Gemini Chef request failed (${response.status}).`);
+  }
+
+  const result = await response.json();
+  const rawText = result?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
+
+  if (!rawText) {
+    throw new Error("Gemini Chef returned an empty recipe collection.");
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(rawText);
+  } catch {
+    throw new Error("Gemini Chef returned invalid JSON.");
+  }
+
+  const recipes = Array.isArray(payload.recipes) ? payload.recipes : [];
+  return recipes
+    .map((recipe, index) => normalizeSyntheticRecipe(
+      {
+        ...recipe,
+        id: recipe.id || `gemini-${normalizeName(recipe.name || `${prompt}-${index + 1}`)}-${Date.now()}-${index + 1}`,
+      },
+      category,
+      prompt,
+    ))
+    .filter(Boolean);
+}
+
 export async function pushShoppingPlanToGoogleSheet(payload) {
   const scriptUrl = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
 
