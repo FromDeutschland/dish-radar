@@ -824,6 +824,13 @@ th {
   letter-spacing: -0.02em;
 }
 
+.chef-search-note {
+  margin: 0;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: var(--ink-muted);
+}
+
 .chef-fallback-copy {
   display: grid;
   gap: 4px;

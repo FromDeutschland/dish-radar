@@ -117,8 +117,6 @@ export const INGREDIENT_LIBRARY_UPDATED_AT = "2026-04-19";
 
 const THEMEALDB_API_KEY = import.meta.env.VITE_THEMEALDB_API_KEY || "1";
 const THEMEALDB_BASE = `https://www.themealdb.com/api/json/v1/${THEMEALDB_API_KEY}`;
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 const THEMEALDB_LETTERS = "abcdefghijklmnopqrstuvwxyz".split("");
 const ALL_APP_CATEGORIES = [
   "salads-veggie-bowls",
@@ -1194,6 +1192,26 @@ function buildGeminiRecipePrompt(prompt, category) {
   ].join("\n");
 }
 
+async function callGeminiChefApi(body) {
+  const response = await fetch("/api/gemini-chef", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data?.error || `Gemini Chef request failed (${response.status}).`);
+    error.status = response.status;
+    error.code = data?.code || "";
+    throw error;
+  }
+
+  return data;
+}
+
 function normalizeSyntheticRecipe(payload, fallbackCategory, prompt) {
   const instructions = parseInstructions(payload.instructions || "");
   const ingredients = (payload.ingredients || []).map(normalizeIngredientRecord).filter(Boolean);
@@ -1227,165 +1245,27 @@ function normalizeSyntheticRecipe(payload, fallbackCategory, prompt) {
 }
 
 export async function generateSyntheticRecipe(prompt, category = "balanced-plate") {
-  if (!GEMINI_API_KEY) {
-    throw new Error("Gemini Chef is not configured. Add VITE_GEMINI_API_KEY to continue.");
-  }
-
-  const response = await fetch(GEMINI_BASE, {
-    method: "POST",
-    headers: {
-      "x-goog-api-key": GEMINI_API_KEY,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: buildGeminiRecipePrompt(prompt, category),
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseJsonSchema: {
-          type: "object",
-          properties: {
-            id: { type: "string" },
-            name: { type: "string" },
-            category: { type: "string" },
-            instructions: { type: "string" },
-            ingredients: {
-              type: "array",
-              items: { type: "string" },
-            },
-            meta: {
-              type: "object",
-              properties: {
-                isAI: { type: "boolean" },
-                cuisine: { type: "string" },
-                tags: {
-                  type: "array",
-                  items: { type: "string" },
-                },
-                prepTimeMinutes: { type: "integer" },
-              },
-              required: ["isAI"],
-            },
-          },
-          required: ["name", "category", "instructions", "ingredients", "meta"],
-        },
-      },
-    }),
+  const payload = await callGeminiChefApi({
+    mode: "single",
+    prompt,
+    category,
+    promptText: buildGeminiRecipePrompt(prompt, category),
   });
-
-  if (!response.ok) {
-    throw new Error(`Gemini Chef request failed (${response.status}).`);
-  }
-
-  const result = await response.json();
-  const rawText = result?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
-
-  if (!rawText) {
-    throw new Error("Gemini Chef returned an empty recipe.");
-  }
-
-  let payload;
-  try {
-    payload = JSON.parse(rawText);
-  } catch {
-    throw new Error("Gemini Chef returned invalid JSON.");
-  }
-
   return normalizeSyntheticRecipe(payload, category, prompt);
 }
 
 export async function generateSyntheticRecipeCollection(prompt, category = "balanced-plate", count = 6) {
-  if (!GEMINI_API_KEY) {
-    throw new Error("Gemini Chef is not configured. Add VITE_GEMINI_API_KEY to continue.");
-  }
-
-  const response = await fetch(GEMINI_BASE, {
-    method: "POST",
-    headers: {
-      "x-goog-api-key": GEMINI_API_KEY,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: [
-                buildGeminiRecipePrompt(prompt, category),
-                `Create ${count} distinct recipe options for this prompt instead of one.`,
-                "Vary the proteins, sauces, aromatics, or produce so the dish options feel genuinely different from each other.",
-              ].join("\n"),
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseJsonSchema: {
-          type: "object",
-          properties: {
-            recipes: {
-              type: "array",
-              items: {
-                type: "object",
-                properties: {
-                  id: { type: "string" },
-                  name: { type: "string" },
-                  category: { type: "string" },
-                  instructions: { type: "string" },
-                  ingredients: {
-                    type: "array",
-                    items: { type: "string" },
-                  },
-                  meta: {
-                    type: "object",
-                    properties: {
-                      isAI: { type: "boolean" },
-                      cuisine: { type: "string" },
-                      tags: {
-                        type: "array",
-                        items: { type: "string" },
-                      },
-                      prepTimeMinutes: { type: "integer" },
-                    },
-                    required: ["isAI"],
-                  },
-                },
-                required: ["name", "category", "instructions", "ingredients", "meta"],
-              },
-            },
-          },
-          required: ["recipes"],
-        },
-      },
-    }),
+  const payload = await callGeminiChefApi({
+    mode: "collection",
+    prompt,
+    category,
+    count,
+    promptText: [
+      buildGeminiRecipePrompt(prompt, category),
+      `Create ${count} distinct recipe options for this prompt instead of one.`,
+      "Vary the proteins, sauces, aromatics, or produce so the dish options feel genuinely different from each other.",
+    ].join("\n"),
   });
-
-  if (!response.ok) {
-    throw new Error(`Gemini Chef request failed (${response.status}).`);
-  }
-
-  const result = await response.json();
-  const rawText = result?.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("").trim();
-
-  if (!rawText) {
-    throw new Error("Gemini Chef returned an empty recipe collection.");
-  }
-
-  let payload;
-  try {
-    payload = JSON.parse(rawText);
-  } catch {
-    throw new Error("Gemini Chef returned invalid JSON.");
-  }
-
   const recipes = Array.isArray(payload.recipes) ? payload.recipes : [];
   return recipes
     .map((recipe, index) => normalizeSyntheticRecipe(

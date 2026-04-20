@@ -2093,6 +2093,7 @@ function App() {
                 <div className="chef-search-copy">
                   <span className="eyebrow">Search with Gemini Chef</span>
                   <strong>Type a vibe, ingredient, or craving and get curated dishes back</strong>
+                  <p className="chef-search-note">If Gemini Chef is busy, Dish Radar now retries automatically before showing an error.</p>
                 </div>
                 <div className="chef-fallback-controls">
                   <input
