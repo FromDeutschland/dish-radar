@@ -1031,6 +1031,15 @@ th {
   color: var(--ink-strong);
 }
 
+.recipe-instruction-list {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 10px;
+  color: var(--ink-strong);
+  line-height: 1.55;
+}
+
 .recipe-facts {
   display: grid;
   gap: 10px;

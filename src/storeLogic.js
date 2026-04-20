@@ -1,8 +1,3 @@
-import { ARCHIVE_DISH_POOL } from "./archiveDishPool";
-import { EXPANDED_ARCHIVE_DISH_POOL } from "./expandedArchiveDishPool";
-import { DISH_POOL } from "./mockDishPool";
-import { buildRecipeMatrixDishes } from "./recipeMatrix";
-
 const STORE_PROFILES = {
   traderJoes: {
     id: "traderJoes",
@@ -27,8 +22,6 @@ const STORE_PROFILES = {
       seafood: 0.86,
       specialty: 0.84,
     },
-    quickRead: "Best for fun weeknight baskets with good sauces and decent produce prices.",
-    tradeoff: "A few specialty items may require substitutions, especially if the basket leans heavily into niche sauces.",
   },
   wholeFoods: {
     id: "wholeFoods",
@@ -53,8 +46,6 @@ const STORE_PROFILES = {
       seafood: 0.97,
       specialty: 0.99,
     },
-    quickRead: "Best coverage when the basket uses specialty sauces, seafood, or dinner-party ingredients.",
-    tradeoff: "Usually the easiest one-stop shop, but the total runs higher when the basket is mostly staples.",
   },
   costco: {
     id: "costco",
@@ -79,196 +70,71 @@ const STORE_PROFILES = {
       seafood: 0.86,
       specialty: 0.6,
     },
-    quickRead: "Best when you are buying a larger, staple-heavy basket and can handle bulk sizes.",
-    tradeoff: "Bulk sizes and weaker specialty coverage make it risky for a smaller wishlist or sauce-heavy plan.",
   },
 };
 
 const EXACT_INGREDIENT_CALORIES = {
-  "gemelli pasta": 1600,
-  "vodka sauce": 520,
-  "calabrian chili paste": 160,
-  shallots: 30,
-  parmesan: 430,
-  "salmon fillets": 620,
-  "jasmine rice": 1650,
-  cucumbers: 45,
-  avocados: 240,
-  "spicy mayo": 720,
-  "shelf-stable gnocchi": 520,
-  "chili crisp": 210,
-  spinach: 20,
-  garlic: 40,
-  pecorino: 500,
-  "chicken thighs": 520,
-  naan: 380,
-  "greek yogurt": 520,
-  "shawarma seasoning": 80,
-  "large tortillas": 700,
-  "romaine hearts": 70,
-  "green goddess dressing": 480,
-  "white beans": 240,
-  halloumi: 620,
-  "small tortillas": 520,
-  "hot honey": 360,
-  "red cabbage": 220,
-  limes: 20,
-  "frozen udon": 420,
-  mushrooms: 40,
-  "white miso": 260,
-  scallions: 25,
   butter: 810,
-  "ground beef": 960,
-  cheddar: 640,
-  pickles: 30,
-  "burger sauce": 560,
-  orzo: 760,
-  "chicken breast": 500,
-  lemons: 20,
-  feta: 400,
-  "sourdough loaf": 1200,
-  "shredded chuck roast": 800,
-  "oaxaca cheese": 640,
-  "birria simmer sauce": 240,
-  "yellow onions": 50,
-  ciabatta: 940,
-  "basil pesto": 700,
-  "cherry tomatoes": 80,
-  burrata: 460,
-  "short grain rice": 1600,
-  "frozen corn": 300,
+  garlic: 40,
+  parmesan: 430,
   mozzarella: 640,
-  gochujang: 260,
-  kimchi: 60,
-  "frozen dumplings": 760,
-  "coconut milk": 420,
-  "red curry paste": 170,
-  "baby bok choy": 40,
-  farro: 1220,
-  "rainbow carrots": 180,
-  "feta block": 600,
-  mint: 10,
-  pistachios: 960,
-  shrimp: 460,
-  "cilantro lime rice": 780,
-  mango: 135,
-  "coleslaw mix": 70,
-  "chipotle crema": 480,
+  pasta: 840,
   spaghetti: 840,
-  thyme: 10,
-  "ground chicken": 700,
-  "broccoli florets": 120,
-  "sesame ginger sauce": 300,
-  fusilli: 840,
-  corn: 80,
-  cotija: 400,
-  tajin: 15,
-  "extra firm tofu": 350,
-  "pickled carrots": 40,
-  cucumber: 45,
-  "sriracha mayo": 720,
-  "sub rolls": 880,
-  "turkey meatballs": 680,
-  basil: 10,
-  flatbreads: 700,
-  chickpeas: 240,
-  "buffalo sauce": 120,
-  "ranch dressing": 520,
-  celery: 30,
-  "pizza dough": 740,
-  arugula: 10,
-  "tomato soup": 180,
-  harissa: 200,
-  couscous: 650,
-  jalapenos: 10,
-  "tandoori simmer sauce": 240,
-  "ground turkey": 680,
-  "green chiles": 30,
-  "black beans": 240,
-  "chicken broth": 40,
-  "baby potatoes": 520,
-  "caesar dressing": 600,
-  breadcrumbs: 420,
-  peaches: 60,
-  "pre-cooked lentils": 340,
-  "roasted red peppers": 110,
-  "ramen noodles": 380,
-  "butter lettuce": 25,
-  "honey soy sauce": 240,
-  carrots: 90,
-  pineapple: 450,
-  "brown rice": 1650,
-  "chipotle peppers": 70,
-  cilantro: 10,
-  "puff pastry": 800,
-  "sharp cheddar": 680,
-  "vegetable broth": 40,
-  "tostada shells": 180,
-  "cabbage slaw": 80,
-  "lo mein noodles": 420,
-  "sesame seeds": 160,
-  "russet potatoes": 170,
-  "sour cream": 450,
-  chives: 10,
-  "red bell pepper": 40,
-  "yellow bell pepper": 40,
   eggs: 70,
+  rice: 1600,
+  potatoes: 520,
+  onions: 50,
+  tomatoes: 80,
+  mushrooms: 40,
+  spinach: 20,
+  carrots: 90,
+  lemon: 20,
+  lime: 20,
+  chicken: 520,
+  beef: 960,
+  pork: 820,
+  salmon: 620,
+  shrimp: 460,
+  chickpeas: 240,
+  yogurt: 520,
+  cream: 450,
+  cheese: 640,
 };
 
 const CATEGORY_UNIT_CALORIES = {
-  bakery: {
-    loaf: 1200,
-    pack: 900,
-    ball: 700,
-  },
-  dairy: {
-    tub: 520,
-    bag: 640,
-    block: 620,
-    box: 810,
-    pack: 520,
-  },
-  frozen: {
-    bag: 760,
-    pack: 420,
-    box: 820,
-  },
-  pantry: {
-    box: 840,
-    bag: 1600,
-    jar: 320,
-    can: 240,
-    carton: 180,
-    pack: 380,
-  },
-  produce: {
-    piece: 75,
-    bag: 150,
-    bunch: 20,
-    head: 90,
-    box: 90,
-  },
-  protein: {
-    lb: 700,
-    bag: 700,
-    block: 350,
-  },
-  seafood: {
-    lb: 560,
-  },
-  specialty: {
-    bottle: 420,
-    jar: 250,
-    tub: 260,
-    can: 100,
-  },
+  bakery: { loaf: 1200, pack: 900, roll: 220, slice: 120 },
+  dairy: { cup: 180, tub: 520, block: 620, pack: 520, piece: 140 },
+  frozen: { bag: 760, pack: 420, box: 820 },
+  pantry: { cup: 200, box: 840, bag: 1600, jar: 320, can: 240, piece: 120 },
+  produce: { piece: 75, cup: 40, bunch: 20, clove: 5 },
+  protein: { piece: 260, lb: 700, cup: 240 },
+  seafood: { piece: 210, lb: 560, cup: 220 },
+  specialty: { tbsp: 60, tsp: 20, bottle: 420, jar: 250, can: 100, piece: 40 },
 };
 
 const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1Tk4ny0z2fEUUquuvBwBpLQMhTt9BsGpep69l0RmvxmE/edit?gid=0#gid=0";
 export const INGREDIENT_LIBRARY_UPDATED_AT = "2026-04-19";
-const RECIPE_DB_BASE = `${(import.meta.env.BASE_URL || "/").replace(/\/$/, "")}/recipe-db`;
-let recipeDatabaseMetaPromise;
-const recipeDatabaseShardCache = new Map();
+
+const THEMEALDB_API_KEY = import.meta.env.VITE_THEMEALDB_API_KEY || "1";
+const THEMEALDB_BASE = `https://www.themealdb.com/api/json/v1/${THEMEALDB_API_KEY}`;
+const THEMEALDB_LETTERS = "abcdefghijklmnopqrstuvwxyz".split("");
+const ALL_APP_CATEGORIES = [
+  "salads-veggie-bowls",
+  "balanced-plate",
+  "pasta-noodles",
+  "one-pot",
+  "handhelds-casual",
+  "soups-stews-chilis",
+];
+
+const CATEGORY_KEYWORDS = {
+  "salads-veggie-bowls": ["salad", "slaw", "bowl", "vegetarian", "vegan", "side"],
+  "balanced-plate": ["beef", "chicken", "seafood", "pork", "lamb", "goat", "main"],
+  "pasta-noodles": ["pasta", "spaghetti", "linguine", "lasagne", "macaroni", "noodle"],
+  "one-pot": ["curry", "tagine", "jambalaya", "risotto", "casserole", "skillet", "pilaf"],
+  "handhelds-casual": ["burger", "sandwich", "taco", "wrap", "pizza", "pie", "roll"],
+  "soups-stews-chilis": ["soup", "stew", "chili", "chowder", "broth"],
+};
 
 const DEFAULT_BASE_PRICES = {
   bakery: 4.2,
@@ -281,220 +147,43 @@ const DEFAULT_BASE_PRICES = {
   specialty: 5.2,
 };
 
-const CATEGORY_QUERY_CONFIG = {
-  "salads-veggie-bowls": {
-    queries: ["salad bowl", "veggie bowl", "grain bowl", "chopped salad"],
-    dishType: "salad",
-  },
-  "balanced-plate": {
-    queries: ["chicken dinner", "salmon dinner", "protein bowl", "sheet pan dinner"],
-    dishType: "main course",
-  },
-  "pasta-noodles": {
-    queries: ["pasta", "noodles", "ramen", "orzo"],
-    dishType: "pasta",
-  },
-  "one-pot": {
-    queries: ["one pot dinner", "skillet dinner", "rice skillet", "casserole"],
-    dishType: "main course",
-  },
-  "handhelds-casual": {
-    queries: ["tacos", "wraps", "sandwiches", "burgers"],
-    dishType: "sandwiches",
-  },
-  "soups-stews-chilis": {
-    queries: ["soup", "stew", "chili", "chowder"],
-    dishType: "soup",
-  },
+const UNICODE_FRACTIONS = {
+  "¼": 0.25,
+  "½": 0.5,
+  "¾": 0.75,
+  "⅐": 1 / 7,
+  "⅓": 1 / 3,
+  "⅔": 2 / 3,
+  "⅕": 0.2,
+  "⅖": 0.4,
+  "⅗": 0.6,
+  "⅘": 0.8,
+  "⅙": 1 / 6,
+  "⅚": 5 / 6,
+  "⅛": 0.125,
+  "⅜": 0.375,
+  "⅝": 0.625,
+  "⅞": 0.875,
 };
 
-const CUISINE_KEYWORDS = [
-  "american",
-  "asian",
-  "caribbean",
-  "chinese",
-  "french",
-  "greek",
-  "indian",
-  "italian",
-  "japanese",
-  "korean",
-  "mediterranean",
-  "mexican",
-  "middle eastern",
-  "south american",
-  "south east asian",
-];
-
-const LOCAL_DISH_LIBRARY_KEYS = Object.keys(CATEGORY_QUERY_CONFIG);
-
-function formatQtyValue(value) {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
-function normalizeName(value) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-}
+let mealLibraryPromise;
+let mealLibraryCache = [];
+let recipeDatabaseMetaPromise;
 
 function normalizeText(value) {
   return `${value || ""}`.toLowerCase().trim();
 }
 
-function buildLocalIngredientId(ingredient) {
-  return normalizeName(`${ingredient.name}-${ingredient.unit}`);
+function normalizeName(value) {
+  return `${value || ""}`.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
-function inferCategoryFromLocalDish(dish) {
-  if (dish.category) {
-    return dish.category;
-  }
-
-  const text = [
-    dish.name,
-    ...(dish.tags || []),
-    ...(dish.sources || []),
-  ]
-    .map(normalizeText)
-    .join(" ");
-
-  if (/(soup|stew|chili|chowder)/.test(text)) {
-    return "soups-stews-chilis";
-  }
-
-  if (/(pasta|noodle|udon|ramen|rigatoni|gemelli|orzo|gnocchi|tortellini|risoni)/.test(text)) {
-    return "pasta-noodles";
-  }
-
-  if (/(taco|wrap|burger|sandwich|sub|slider|pita|quesadilla|crunchwrap|pizza|flatbread|toast)/.test(text)) {
-    return "handhelds-casual";
-  }
-
-  if (/(skillet|bake|pot pie|rice pot|one pot|casserole)/.test(text)) {
-    return "one-pot";
-  }
-
-  if (/salad/.test(text)) {
-    return "salads-veggie-bowls";
-  }
-
-  if (/bowl/.test(text)) {
-    return (dish.tags || []).includes("veg") || (dish.tags || []).includes("fresh")
-      ? "salads-veggie-bowls"
-      : "balanced-plate";
-  }
-
-  return "balanced-plate";
+function cleanTag(value) {
+  return normalizeText(value).replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
 }
 
-function normalizeLocalDish(dish) {
-  return {
-    ...dish,
-    category: inferCategoryFromLocalDish(dish),
-    cuisines: dish.cuisines || [],
-    dishTypes: dish.dishTypes || [],
-    mealTypes: dish.mealTypes || [],
-    ingredients: (dish.ingredients || []).map((ingredient) => ({
-      id: ingredient.id || buildLocalIngredientId(ingredient),
-      ...ingredient,
-    })),
-  };
-}
-
-function buildLocalDishLibrary(triedDishes) {
-  const basePool = [...DISH_POOL, ...ARCHIVE_DISH_POOL, ...EXPANDED_ARCHIVE_DISH_POOL].map(normalizeLocalDish);
-  const matrixPool = buildRecipeMatrixDishes(basePool, triedDishes, (dish) => dish.category).map(normalizeLocalDish);
-  const merged = new Map();
-
-  [...basePool, ...matrixPool].forEach((dish) => {
-    merged.set(dish.id, dish);
-  });
-
-  return Array.from(merged.values());
-}
-
-export function getDishLibrarySnapshot(triedDishes = []) {
-  return buildLocalDishLibrary(triedDishes);
-}
-
-export async function fetchRecipeDatabaseMeta() {
-  if (!recipeDatabaseMetaPromise) {
-    recipeDatabaseMetaPromise = fetch(`${RECIPE_DB_BASE}/index.json`).then(async (response) => {
-      if (!response.ok) {
-        throw new Error(`Recipe database metadata failed to load (${response.status}).`);
-      }
-      return response.json();
-    });
-  }
-
-  return recipeDatabaseMetaPromise;
-}
-
-async function fetchRecipeShard(shardName) {
-  if (!recipeDatabaseShardCache.has(shardName)) {
-    recipeDatabaseShardCache.set(
-      shardName,
-      fetch(`${RECIPE_DB_BASE}/${shardName}`).then(async (response) => {
-        if (!response.ok) {
-          throw new Error(`Recipe database shard failed to load (${response.status}).`);
-        }
-        return response.json();
-      }),
-    );
-  }
-
-  return recipeDatabaseShardCache.get(shardName);
-}
-
-function pickShardNames(metadata, category, count = 1, seed = Date.now()) {
-  const shards = metadata?.categories?.[category]?.shards || [];
-
-  if (!shards.length) {
-    return [];
-  }
-
-  const names = [];
-  const start = seed % shards.length;
-
-  for (let offset = 0; offset < Math.min(count, shards.length); offset += 1) {
-    names.push(shards[(start + offset) % shards.length]);
-  }
-
-  return names;
-}
-
-function scoreDishAgainstPreferences(dish, biasKeywords) {
-  if (!biasKeywords.length) {
-    return 0;
-  }
-
-  const haystack = [
-    dish.name,
-    dish.trendNote,
-    ...(dish.tags || []),
-    ...(dish.cuisines || []),
-    ...(dish.sources || []),
-  ]
-    .map(normalizeText)
-    .join(" ");
-
-  return biasKeywords.reduce((total, keyword, index) => {
-    if (!keyword || !haystack.includes(keyword)) {
-      return total;
-    }
-
-    return total + (biasKeywords.length - index);
-  }, 0);
-}
-
-function shuffleCollection(items) {
-  const next = [...items];
-
-  for (let index = next.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(Math.random() * (index + 1));
-    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
-  }
-
-  return next;
+function formatQtyValue(value) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
 }
 
 function formatQty(amount, unit) {
@@ -515,12 +204,98 @@ export function formatCalories(value) {
   }).format(value);
 }
 
+function getBasePrice(category) {
+  return DEFAULT_BASE_PRICES[category] ?? 3.5;
+}
+
+function parseFractionToken(token) {
+  const value = token.trim();
+  if (!value) {
+    return null;
+  }
+  if (UNICODE_FRACTIONS[value]) {
+    return UNICODE_FRACTIONS[value];
+  }
+  if (/^\d+\/\d+$/.test(value)) {
+    const [numerator, denominator] = value.split("/").map(Number);
+    return denominator ? numerator / denominator : null;
+  }
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function cleanMeasure(value) {
+  const normalized = normalizeText(value);
+  if (!normalized || normalized === "to taste") {
+    return "piece";
+  }
+  if (normalized.includes("ounce")) return "oz";
+  if (normalized.includes("pound")) return "lb";
+  if (normalized.includes("cup")) return "cup";
+  if (normalized.includes("tablespoon")) return "tbsp";
+  if (normalized.includes("teaspoon")) return "tsp";
+  if (normalized.includes("slice")) return "slice";
+  if (normalized.includes("clove")) return "clove";
+  return normalized.replace(/[^a-z0-9]+/g, " ").trim() || "piece";
+}
+
+function parseMeasureValue(measure) {
+  const normalized = `${measure || ""}`.trim();
+  if (!normalized) {
+    return { amount: 1, unit: "piece" };
+  }
+
+  const tokens = normalized.split(/\s+/);
+  let amount = 0;
+  let consumed = 0;
+
+  while (consumed < tokens.length) {
+    const parsed = parseFractionToken(tokens[consumed]);
+    if (parsed === null) {
+      break;
+    }
+    amount += parsed;
+    consumed += 1;
+  }
+
+  const remainder = tokens.slice(consumed).join(" ").trim();
+  return {
+    amount: amount > 0 ? Math.round(amount * 10) / 10 : 1,
+    unit: cleanMeasure(remainder || normalized),
+  };
+}
+
+function inferIngredientCategoryFromName(name) {
+  const food = normalizeText(name);
+
+  if (/(chicken|beef|pork|turkey|lamb|goat|duck|sausage|meatball|tofu)/.test(food)) {
+    return "protein";
+  }
+  if (/(shrimp|salmon|tuna|prawn|fish|cod|mackerel|seafood)/.test(food)) {
+    return "seafood";
+  }
+  if (/(lettuce|spinach|tomato|cucumber|onion|pepper|lemon|lime|garlic|ginger|potato|broccoli|cabbage|carrot|herb|parsley|cilantro|avocado|mushroom|chili)/.test(food)) {
+    return "produce";
+  }
+  if (/(cheese|milk|yogurt|cream|butter|feta|mozzarella|parmesan)/.test(food)) {
+    return "dairy";
+  }
+  if (/(bread|bun|tortilla|roll|pita|naan|loaf|pastry)/.test(food)) {
+    return "bakery";
+  }
+  if (/(stock|broth|sauce|paste|dressing|seasoning|spice|curry|miso|gochujang|pesto)/.test(food)) {
+    return "specialty";
+  }
+  return "pantry";
+}
+
 function estimateIngredientCalories(ingredient) {
   if (typeof ingredient.calories === "number") {
     return ingredient.calories;
   }
 
-  const exact = EXACT_INGREDIENT_CALORIES[ingredient.name];
+  const exactKey = normalizeText(ingredient.name);
+  const exact = EXACT_INGREDIENT_CALORIES[exactKey];
   if (typeof exact === "number") {
     return ingredient.amount * exact;
   }
@@ -539,7 +314,7 @@ export function estimateDishCalories(dish) {
   }
 
   return Math.round(
-    dish.ingredients.reduce((total, ingredient) => total + estimateIngredientCalories(ingredient), 0) / 10,
+    ((dish.ingredients || []).reduce((total, ingredient) => total + estimateIngredientCalories(ingredient), 0)) / 10,
   ) * 10;
 }
 
@@ -547,7 +322,7 @@ function aggregateIngredients(dishes) {
   const rowsByKey = new Map();
 
   dishes.forEach((dish) => {
-    dish.ingredients.forEach((ingredient) => {
+    (dish.ingredients || []).forEach((ingredient) => {
       const key = `${ingredient.id || normalizeName(ingredient.name)}::${ingredient.unit}`;
       const existing = rowsByKey.get(key) ?? {
         ingredientId: ingredient.id || "",
@@ -561,11 +336,9 @@ function aggregateIngredients(dishes) {
 
       existing.amount += ingredient.amount;
       existing.basePrice = ingredient.basePrice;
-
       if (!existing.dishes.includes(dish.name)) {
         existing.dishes.push(dish.name);
       }
-
       rowsByKey.set(key, existing);
     });
   });
@@ -619,15 +392,12 @@ function estimateStore(store, rows, wishlistSize) {
   if (store.id === "costco" && wishlistSize < 4) {
     estimatedTotal += 14;
   }
-
   if (store.id === "costco" && (categoryCounts.specialty ?? 0) >= 2) {
     estimatedTotal += 10;
   }
-
   if (store.id === "wholeFoods" && (categoryCounts.specialty ?? 0) >= 3) {
     estimatedTotal -= 4;
   }
-
   if (store.id === "traderJoes" && (categoryCounts.specialty ?? 0) >= 4) {
     estimatedTotal += 6;
   }
@@ -642,13 +412,11 @@ function estimateStore(store, rows, wishlistSize) {
 
 export function createShoppingPlan(dishes) {
   const aggregatedRows = aggregateIngredients(dishes);
-
   const storeRanking = Object.values(STORE_PROFILES)
     .map((store) => estimateStore(store, aggregatedRows, dishes.length))
     .sort((left, right) => left.estimatedTotal - right.estimatedTotal);
 
   const recommendedStore = storeRanking[0];
-
   const rows = aggregatedRows.map((row) => ({
     ingredientId: row.ingredientId,
     ingredient: row.ingredient,
@@ -695,227 +463,162 @@ export function buildGoogleSheetPayload(plan, metadata = {}) {
   };
 }
 
-function cleanMeasure(value) {
-  const normalized = normalizeText(value);
-
-  if (!normalized || normalized === "<unit>" || normalized === "whole") {
-    return "piece";
+function parseInstructions(text) {
+  const raw = `${text || ""}`.trim();
+  if (!raw) {
+    return [];
   }
 
-  if (normalized.includes("ounce")) {
-    return "oz";
+  const paragraphs = raw
+    .split(/\r?\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (paragraphs.length > 1) {
+    return paragraphs;
   }
 
-  if (normalized.includes("pound")) {
-    return "lb";
-  }
-
-  if (normalized.includes("cup")) {
-    return "cup";
-  }
-
-  if (normalized.includes("tablespoon")) {
-    return "tbsp";
-  }
-
-  if (normalized.includes("teaspoon")) {
-    return "tsp";
-  }
-
-  if (normalized.includes("slice")) {
-    return "slice";
-  }
-
-  if (normalized.includes("leaf")) {
-    return "leaf";
-  }
-
-  return normalized.replace(/[^a-z0-9]+/g, " ").trim() || "piece";
+  return raw
+    .split(/(?<=\.)\s+(?=[A-Z])/)
+    .map((step) => step.trim())
+    .filter(Boolean);
 }
 
-function getBasePrice(category) {
-  return DEFAULT_BASE_PRICES[category] ?? 3.5;
+function estimatePrepTime(meal, ingredientCount, instructionCount) {
+  const text = normalizeText(`${meal.strMeal} ${meal.strInstructions} ${meal.strCategory}`);
+  let estimate = 12 + ingredientCount * 2 + instructionCount * 4;
+
+  if (/(slow cook|simmer|bake|roast|marinate)/.test(text)) {
+    estimate += 14;
+  }
+  if (/(salad|sandwich|wrap)/.test(text)) {
+    estimate -= 8;
+  }
+  if (/(pasta|curry|stew|tagine|pie)/.test(text)) {
+    estimate += 8;
+  }
+
+  return Math.max(10, Math.min(60, Math.round(estimate / 5) * 5));
 }
 
-function buildIngredientId(ingredient) {
-  return ingredient.foodId || normalizeName(ingredient.food || ingredient.text || "ingredient");
-}
+function inferAppCategoryFromMeal(meal) {
+  const text = normalizeText(`${meal.strMeal} ${meal.strCategory} ${meal.strInstructions}`);
 
-function inferIngredientCategory(ingredient) {
-  const category = normalizeText(ingredient.foodCategory);
-  const food = normalizeText(ingredient.food || ingredient.text);
-  const measure = normalizeText(ingredient.measure);
-
-  if (category.includes("meat") || category.includes("poultry")) {
-    return "protein";
-  }
-
-  if (category.includes("fish") || category.includes("seafood")) {
-    return "seafood";
-  }
-
-  if (category.includes("vegetable") || category.includes("fruit")) {
-    return "produce";
-  }
-
-  if (category.includes("milk") || category.includes("cheese") || category.includes("yogurt") || category.includes("dairy")) {
-    return "dairy";
-  }
-
-  if (category.includes("bread") || category.includes("baked")) {
-    return "bakery";
-  }
-
-  if (category.includes("frozen")) {
-    return "frozen";
-  }
-
-  if (category.includes("condiment") || category.includes("sauce") || category.includes("spice") || category.includes("herb")) {
-    return "specialty";
-  }
-
-  if (
-    food.includes("chicken")
-    || food.includes("beef")
-    || food.includes("pork")
-    || food.includes("turkey")
-    || food.includes("sausage")
-    || food.includes("tofu")
-    || food.includes("meatball")
-  ) {
-    return "protein";
-  }
-
-  if (food.includes("shrimp") || food.includes("salmon") || food.includes("tuna") || food.includes("cod") || food.includes("fish")) {
-    return "seafood";
-  }
-
-  if (
-    food.includes("lettuce")
-    || food.includes("spinach")
-    || food.includes("tomato")
-    || food.includes("cucumber")
-    || food.includes("onion")
-    || food.includes("pepper")
-    || food.includes("lemon")
-    || food.includes("lime")
-    || food.includes("garlic")
-    || food.includes("herb")
-    || food.includes("potato")
-    || food.includes("broccoli")
-    || food.includes("cabbage")
-  ) {
-    return "produce";
-  }
-
-  if (food.includes("cheese") || food.includes("milk") || food.includes("yogurt") || food.includes("cream") || food.includes("butter")) {
-    return "dairy";
-  }
-
-  if (food.includes("bread") || food.includes("bun") || food.includes("tortilla") || food.includes("roll") || food.includes("pita")) {
-    return "bakery";
-  }
-
-  if (
-    food.includes("sauce")
-    || food.includes("paste")
-    || food.includes("dressing")
-    || food.includes("seasoning")
-    || food.includes("spice")
-    || measure.includes("tablespoon")
-    || measure.includes("teaspoon")
-  ) {
-    return "specialty";
-  }
-
-  return "pantry";
-}
-
-function normalizeIngredientAmount(value) {
-  if (!Number.isFinite(value) || value <= 0) {
-    return 1;
-  }
-
-  if (value >= 10) {
-    return Math.round(value);
-  }
-
-  return Math.round(value * 10) / 10;
-}
-
-function cleanTag(value) {
-  return normalizeText(value).replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
-}
-
-function inferCategoryFromRecipe(recipe, fallbackCategory = "") {
-  if (fallbackCategory) {
-    return fallbackCategory;
-  }
-
-  const dishTypes = (recipe.dishType || []).map(normalizeText);
-  const label = normalizeText(recipe.label);
-
-  if (dishTypes.includes("salad")) {
-    return "salads-veggie-bowls";
-  }
-  if (dishTypes.includes("sandwiches") || dishTypes.includes("pizza")) {
-    return "handhelds-casual";
-  }
-  if (dishTypes.includes("soup")) {
-    return "soups-stews-chilis";
-  }
-  if (dishTypes.includes("pasta")) {
+  if (/(salad|slaw|bowl)/.test(text)) return "salads-veggie-bowls";
+  if (/(burger|sandwich|wrap|taco|quesadilla|pizza|pie|roll)/.test(text)) return "handhelds-casual";
+  if (/(soup|stew|chili|chowder|broth)/.test(text)) return "soups-stews-chilis";
+  if (normalizeText(meal.strCategory) === "pasta" || /(pasta|spaghetti|linguine|lasagne|macaroni|noodle|ramen)/.test(text)) {
     return "pasta-noodles";
   }
-  if (dishTypes.includes("main course") && (label.includes("skillet") || label.includes("one-pot") || label.includes("casserole"))) {
-    return "one-pot";
-  }
-  if (dishTypes.includes("main course") || dishTypes.includes("seafood")) {
-    return "balanced-plate";
-  }
-  if (label.includes("soup") || label.includes("stew") || label.includes("chili")) {
-    return "soups-stews-chilis";
-  }
-  if (label.includes("pasta") || label.includes("noodle") || label.includes("ramen") || label.includes("orzo")) {
-    return "pasta-noodles";
-  }
-  if (label.includes("taco") || label.includes("wrap") || label.includes("burger") || label.includes("sandwich") || label.includes("pizza")) {
-    return "handhelds-casual";
-  }
-  if (label.includes("salad") || label.includes("bowl")) {
-    return "salads-veggie-bowls";
-  }
-  if (label.includes("skillet") || label.includes("casserole") || label.includes("rice")) {
-    return "one-pot";
-  }
-
+  if (/(curry|tagine|risotto|jambalaya|paella|casserole|skillet|pilaf)/.test(text)) return "one-pot";
+  if (["vegetarian", "vegan", "side", "starter"].includes(normalizeText(meal.strCategory))) return "salads-veggie-bowls";
   return "balanced-plate";
 }
 
-function buildRecipeTags(recipe, category) {
+function buildMealTags(meal, category, time) {
   const tags = [
-    ...(recipe.cuisineType || []),
-    ...(recipe.dishType || []),
-    ...(recipe.mealType || []),
-  ]
-    .map(cleanTag)
-    .filter(Boolean);
+    cleanTag(meal.strCategory),
+    cleanTag(meal.strArea),
+    ...(CATEGORY_KEYWORDS[category] || []).slice(0, 2).map(cleanTag),
+  ].filter(Boolean);
 
-  if (category === "handhelds-casual" && !tags.includes("casual")) {
-    tags.push("casual");
-  }
-  if (category === "salads-veggie-bowls" && !tags.includes("fresh")) {
-    tags.push("fresh");
-  }
-  if (recipe.totalTime > 0 && recipe.totalTime <= 20) {
+  if (time <= 20) {
     tags.push("quick");
   }
 
   return [...new Set(tags)].slice(0, 6);
 }
 
-function pickQueryIndex(seed, size) {
-  return size ? seed % size : 0;
+function normalizeMealDbMeal(meal) {
+  const instructions = parseInstructions(meal.strInstructions);
+  const ingredients = Array.from({ length: 20 }, (_, index) => index + 1)
+    .map((index) => {
+      const name = `${meal[`strIngredient${index}`] || ""}`.trim();
+      if (!name) {
+        return null;
+      }
+
+      const { amount, unit } = parseMeasureValue(meal[`strMeasure${index}`] || "");
+      const category = inferIngredientCategoryFromName(name);
+      return {
+        id: normalizeName(name),
+        name,
+        amount,
+        unit,
+        category,
+        basePrice: getBasePrice(category),
+      };
+    })
+    .filter(Boolean);
+
+  const category = inferAppCategoryFromMeal(meal);
+  const time = estimatePrepTime(meal, ingredients.length, instructions.length);
+
+  return {
+    id: meal.idMeal,
+    name: meal.strMeal,
+    category,
+    time,
+    calories: null,
+    trendNote: meal.strArea && meal.strCategory
+      ? `${meal.strArea} ${meal.strCategory.toLowerCase()} recipe from TheMealDB.`
+      : "Recipe loaded from TheMealDB.",
+    sources: ["TheMealDB", ...(meal.strSource ? [meal.strSource] : []), ...(meal.strYoutube ? [meal.strYoutube] : [])],
+    cuisines: meal.strArea ? [meal.strArea] : [],
+    tags: buildMealTags(meal, category, time),
+    instructions,
+    image: meal.strMealThumb || "",
+    ingredients,
+  };
+}
+
+async function fetchMealDbJson(path) {
+  const response = await fetch(`${THEMEALDB_BASE}${path}`);
+  if (!response.ok) {
+    throw new Error(`TheMealDB request failed (${response.status}).`);
+  }
+  return response.json();
+}
+
+async function loadMealLibrary() {
+  if (!mealLibraryPromise) {
+    mealLibraryPromise = Promise.all(
+      THEMEALDB_LETTERS.map((letter) => fetchMealDbJson(`/search.php?f=${letter}`)),
+    ).then((results) => {
+      const unique = new Map();
+      results
+        .flatMap((result) => result.meals || [])
+        .map(normalizeMealDbMeal)
+        .forEach((meal) => {
+          unique.set(meal.id, meal);
+        });
+      mealLibraryCache = Array.from(unique.values());
+      return mealLibraryCache;
+    });
+  }
+
+  return mealLibraryPromise;
+}
+
+export function getDishLibrarySnapshot() {
+  return mealLibraryCache;
+}
+
+export async function fetchRecipeDatabaseMeta() {
+  if (!recipeDatabaseMetaPromise) {
+    recipeDatabaseMetaPromise = Promise.all([
+      loadMealLibrary(),
+      fetchMealDbJson("/list.php?i=list").catch(() => ({ meals: [] })),
+    ]).then(([meals, ingredientResult]) => ({
+      totalDishCount: meals.length,
+      uniqueIngredientCount: ingredientResult.meals?.length || new Set(
+        meals.flatMap((meal) => (meal.ingredients || []).map((ingredient) => normalizeText(ingredient.name))),
+      ).size,
+      generatedAt: new Date().toISOString().slice(0, 10),
+    }));
+  }
+
+  return recipeDatabaseMetaPromise;
 }
 
 export function extractPreferenceKeywords(triedDishes) {
@@ -952,73 +655,71 @@ export function extractPreferenceKeywords(triedDishes) {
     .slice(0, 8);
 }
 
-function buildSearchPhrase(category, queryIndex, biasKeywords) {
-  const config = CATEGORY_QUERY_CONFIG[category] || CATEGORY_QUERY_CONFIG["balanced-plate"];
-  const baseQuery = config.queries[pickQueryIndex(queryIndex, config.queries.length)];
-  const cuisineBias = biasKeywords.find((keyword) => CUISINE_KEYWORDS.includes(keyword));
-  const flavorBias = biasKeywords.find((keyword) => !CUISINE_KEYWORDS.includes(keyword));
+function scoreDishAgainstPreferences(dish, biasKeywords) {
+  if (!biasKeywords.length) {
+    return 0;
+  }
 
-  return [cuisineBias, flavorBias, baseQuery].filter(Boolean).join(" ").trim();
+  const haystack = [
+    dish.name,
+    dish.trendNote,
+    ...(dish.tags || []),
+    ...(dish.cuisines || []),
+    ...(dish.instructions || []),
+    ...(dish.sources || []),
+  ]
+    .map(normalizeText)
+    .join(" ");
+
+  return biasKeywords.reduce((total, keyword, index) => {
+    if (!keyword || !haystack.includes(keyword)) {
+      return total;
+    }
+    return total + (biasKeywords.length - index);
+  }, 0);
+}
+
+function scoreCategoryMatch(dish, category) {
+  const haystack = [
+    dish.name,
+    ...(dish.tags || []),
+    ...(dish.cuisines || []),
+    dish.trendNote,
+  ]
+    .map(normalizeText)
+    .join(" ");
+
+  return (CATEGORY_KEYWORDS[category] || []).reduce(
+    (total, keyword) => total + (haystack.includes(keyword) ? 1 : 0),
+    0,
+  );
+}
+
+function shuffleCollection(items) {
+  const next = [...items];
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
+  }
+  return next;
 }
 
 export async function fetchDishOptions({ categories, triedDishes, limit = 30 }) {
-  const activeCategories = categories?.length ? categories : LOCAL_DISH_LIBRARY_KEYS;
+  const activeCategories = categories?.length ? categories : ALL_APP_CATEGORIES;
   const biasKeywords = extractPreferenceKeywords(triedDishes);
-  const localLibrary = buildLocalDishLibrary(triedDishes);
-  let remoteLibrary = [];
+  const library = await loadMealLibrary();
 
-  try {
-    const metadata = await fetchRecipeDatabaseMeta();
-    const timeSeed = Math.floor(Date.now() / 60000);
-    const shardPromises = activeCategories.flatMap((category, index) => {
-      const shardNames = pickShardNames(metadata, category, activeCategories.length === 1 ? 2 : 1, timeSeed + index);
-      return shardNames.map((shardName) => fetchRecipeShard(shardName));
-    });
-
-    const shardResults = await Promise.all(shardPromises);
-    remoteLibrary = shardResults
-      .flat()
-      .map(normalizeLocalDish)
-      .filter((dish) => activeCategories.includes(dish.category));
-  } catch {
-    remoteLibrary = [];
-  }
-
-  const mergedLibrary = new Map();
-  [...localLibrary, ...remoteLibrary].forEach((dish) => {
-    if (!mergedLibrary.has(dish.id)) {
-      mergedLibrary.set(dish.id, dish);
-    }
-  });
-
-  const library = Array.from(mergedLibrary.values());
-  const scored = library
-    .filter((dish) => activeCategories.includes(dish.category))
-    .map((dish) => {
-      const categoryBoost = activeCategories.length === 1 && dish.category === activeCategories[0] ? 10 : 0;
-      const queryBoost = activeCategories.reduce((total, category, index) => {
-        const searchPhrase = buildSearchPhrase(category, index, biasKeywords);
-        const searchTokens = normalizeText(searchPhrase).split(/[^a-z0-9]+/).filter(Boolean);
-        const haystack = [
-          dish.name,
-          dish.trendNote,
-          ...(dish.tags || []),
-          ...(dish.sources || []),
-        ]
-          .map(normalizeText)
-          .join(" ");
-
-        return total + searchTokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), 0);
-      }, 0);
-
-      return {
+  const dishes = shuffleCollection(
+    library
+      .filter((dish) => activeCategories.includes(dish.category))
+      .map((dish) => ({
         dish,
-        score: scoreDishAgainstPreferences(dish, biasKeywords) + categoryBoost + queryBoost,
-      };
-    });
-
-  const shuffled = shuffleCollection(scored);
-  const dishes = shuffled
+        score:
+          scoreDishAgainstPreferences(dish, biasKeywords)
+          + activeCategories.reduce((total, category) => total + scoreCategoryMatch(dish, category), 0)
+          + (activeCategories.length === 1 && dish.category === activeCategories[0] ? 8 : 0),
+      })),
+  )
     .sort((left, right) => right.score - left.score || left.dish.name.localeCompare(right.dish.name))
     .map(({ dish }) => dish)
     .slice(0, limit);
@@ -1045,7 +746,7 @@ export async function pushShoppingPlanToGoogleSheet(payload) {
   });
 
   if (!response.ok) {
-    throw new Error(`Google Sheets export failed (${response.status}).`);
+    throw new Error(`Google Sheet export failed (${response.status}).`);
   }
 
   return response.json();

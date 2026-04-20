@@ -495,7 +495,7 @@ function App() {
       topStore: Object.entries(storeCounts).sort((left, right) => right[1] - left[1])[0]?.[0] || "None yet",
       pendingReviews: triedDishes.length,
       pantryLines: pantryInventory.length + manualPantryItems.length,
-      totalLibraryDishes: (recipeDatabaseMeta?.totalDishCount || 0) + baseDishLibrary.length,
+      totalLibraryDishes: recipeDatabaseMeta?.totalDishCount || baseDishLibrary.length,
       totalLibraryIngredients: recipeDatabaseMeta?.uniqueIngredientCount || uniqueIngredients.size,
       lastIngredientUpdate: recipeDatabaseMeta?.generatedAt || INGREDIENT_LIBRARY_UPDATED_AT,
       topDishes,
@@ -1146,7 +1146,7 @@ function App() {
             <p>
               {sourceMix.length
                 ? `Current chosen dishes come from: ${sourceMix.map((item) => `${item.source} (${item.count})`).join(", ")}.`
-                : "Day pickers use the built-in recipe library, archive dishes, and rating-based variations."}
+                : "Day pickers now use TheMealDB for recipes, ingredients, and cooking instructions."}
             </p>
             {fetchState.error ? <p>{fetchState.error}</p> : null}
           </div>
@@ -1430,6 +1430,19 @@ function App() {
                           </div>
                         </div>
                       </div>
+                    </div>
+
+                    <div className="recipe-block">
+                      <strong>Instructions</strong>
+                      {(entry.dish.instructions || []).length ? (
+                        <ol className="recipe-instruction-list">
+                          {entry.dish.instructions.map((step, index) => (
+                            <li key={`${entry.dish.id}-step-${index}`}>{step}</li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="empty-copy">No step-by-step instructions were returned for this recipe.</p>
+                      )}
                     </div>
                   </article>
                 ))}
@@ -2135,7 +2148,7 @@ function App() {
             </button>
           </div>
 
-          <p className="empty-copy">Plan dishes from the built-in recipe library, confirm shopping, and keep pantry leftovers until fully consumed.</p>
+          <p className="empty-copy">Plan dishes from TheMealDB, confirm shopping, and keep pantry leftovers until fully consumed.</p>
 
           <ol className="workflow-list help-workflow-list">
             {WORKFLOW_STEPS.map((step) => (
