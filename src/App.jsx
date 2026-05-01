@@ -154,6 +154,17 @@ function createEmptyDayPicker() {
   };
 }
 
+function createGenerationJob(category, overrides = {}) {
+  return {
+    category,
+    loading: false,
+    ready: false,
+    optionCount: 0,
+    error: "",
+    ...overrides,
+  };
+}
+
 function buildGeminiPrompt({ category, dayName, searchText, biasKeywords, count }) {
   const categoryLabel = CATEGORY_LABELS[category] || "dinner";
   const parts = [];
@@ -210,6 +221,7 @@ function App() {
   const [pantryCarryover, setPantryCarryover] = useState(() => safeRead(STORAGE_KEYS.pantryCarryover, []));
   const [ratingHistory] = useState(() => safeRead(STORAGE_KEYS.ratingHistory, []));
   const [dayPicker, setDayPicker] = useState(() => createEmptyDayPicker());
+  const [generationJobs, setGenerationJobs] = useState({});
   const [exportMessage, setExportMessage] = useState("");
   const [screenedPlanState, setScreenedPlanState] = useState({
     signature: "",
@@ -414,8 +426,24 @@ function App() {
       const savedFreshDishes = persistGeneratedDishes(category, freshDishes);
       const mergedOptions = uniqById([...initialOptions, ...savedFreshDishes]).slice(0, 20);
 
+      setGenerationJobs((current) => {
+        const existingJob = current[dayName];
+        if (existingJob && existingJob.category !== category) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [dayName]: createGenerationJob(category, {
+            ready: true,
+            optionCount: mergedOptions.length,
+            updatedAt: Date.now(),
+          }),
+        };
+      });
+
       setDayPicker((current) => ({
-        ...current,
+        ...(current.dayName === dayName && current.category === category ? current : createEmptyDayPicker()),
         loading: false,
         options: mergedOptions,
         notice: initialOptions.length
@@ -424,8 +452,24 @@ function App() {
         error: "",
       }));
     } catch (error) {
+      setGenerationJobs((current) => {
+        const existingJob = current[dayName];
+        if (existingJob && existingJob.category !== category) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [dayName]: createGenerationJob(category, {
+            ready: initialOptions.length > 0,
+            optionCount: initialOptions.length,
+            error: initialOptions.length ? "" : (error.message || "Gemini Chef could not generate dishes right now."),
+          }),
+        };
+      });
+
       setDayPicker((current) => ({
-        ...current,
+        ...(current.dayName === dayName && current.category === category ? current : createEmptyDayPicker()),
         loading: false,
         options: initialOptions,
         error: initialOptions.length
@@ -447,6 +491,15 @@ function App() {
     const cachedOptions = getPoolDishes(category);
     const preload = cachedOptions.slice(0, 10);
     const requestedCount = preload.length >= 10 ? 10 : Math.max(20 - preload.length, 10);
+
+    setGenerationJobs((current) => ({
+      ...current,
+      [dayName]: createGenerationJob(category, {
+        loading: true,
+        ready: preload.length > 0,
+        optionCount: preload.length,
+      }),
+    }));
 
     setDayPicker({
       dayName,
@@ -471,6 +524,11 @@ function App() {
   function handleDaySelection(dayName, category) {
     setExportMessage("");
     setWeekSelections((current) => ({ ...current, [dayName]: category }));
+    setGenerationJobs((current) => {
+      const next = { ...current };
+      delete next[dayName];
+      return next;
+    });
     setDayDishSelections((current) => {
       const next = { ...current };
       delete next[dayName];
@@ -501,6 +559,7 @@ function App() {
   function resetWeek() {
     setWeekSelections(getDefaultWeekSelections());
     setDayDishSelections({});
+    setGenerationJobs({});
     setDayPicker(createEmptyDayPicker());
     setExportMessage("");
   }
@@ -516,6 +575,14 @@ function App() {
       error: "",
       notice: "Gemini Chef is curating 20 dishes from your search...",
       options: [],
+    }));
+    setGenerationJobs((current) => ({
+      ...current,
+      [dayPicker.dayName]: createGenerationJob(dayPicker.category, {
+        loading: true,
+        ready: false,
+        optionCount: 0,
+      }),
     }));
 
     await fillDayPicker({
@@ -623,6 +690,11 @@ function App() {
               {weekDays.map((day) => {
                 const category = weekSelections[day.key];
                 const dish = dishLookup[dayDishSelections[day.key]];
+                const cachedOptionCount = category ? getPoolDishes(category).length : 0;
+                const dayJob = generationJobs[day.key];
+                const jobMatchesCategory = dayJob?.category === category;
+                const isGeneratingForDay = Boolean(category && jobMatchesCategory && dayJob.loading);
+                const isReadyForDay = Boolean(category && !dish && (cachedOptionCount || (jobMatchesCategory && dayJob.ready)));
 
                 return (
                   <article key={day.key} className="day-card">
@@ -670,9 +742,22 @@ function App() {
                             </div>
                           </div>
                         ) : (
-                          <button className="action-button wide" onClick={() => openDayDishPicker(day.key, category)}>
-                            Choose dish
-                          </button>
+                          <>
+                            <button className="action-button wide" onClick={() => openDayDishPicker(day.key, category)}>
+                              Choose dish
+                            </button>
+                            {isGeneratingForDay ? (
+                              <div className={`day-generation-status ${cachedOptionCount ? "ready" : "loading"}`}>
+                                <span>{cachedOptionCount ? "✓" : "•"}</span>
+                                {cachedOptionCount ? "Ready, adding more ideas" : "Curating dish ideas..."}
+                              </div>
+                            ) : isReadyForDay ? (
+                              <button className="day-generation-status ready clickable" onClick={() => openDayDishPicker(day.key, category)}>
+                                <span>✓</span>
+                                Ready to select
+                              </button>
+                            ) : null}
+                          </>
                         )}
                       </div>
                     ) : null}
