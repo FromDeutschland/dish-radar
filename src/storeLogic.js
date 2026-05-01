@@ -147,6 +147,28 @@ const DEFAULT_BASE_PRICES = {
   specialty: 5.2,
 };
 
+const STORE_AISLE_ORDER = [
+  "produce",
+  "seafood",
+  "protein",
+  "dairy",
+  "bakery",
+  "pantry",
+  "specialty",
+  "frozen",
+];
+
+const STORE_AISLE_LABELS = {
+  produce: "Produce",
+  seafood: "Seafood",
+  protein: "Meat & Protein",
+  dairy: "Dairy & Eggs",
+  bakery: "Bakery",
+  pantry: "Pantry",
+  specialty: "Sauces & Specialty",
+  frozen: "Frozen",
+};
+
 const UNICODE_FRACTIONS = {
   "¼": 0.25,
   "½": 0.5,
@@ -785,7 +807,18 @@ function aggregateIngredients(dishes) {
     });
   });
 
-  return Array.from(rowsByKey.values()).sort((left, right) => left.ingredient.localeCompare(right.ingredient));
+  return Array.from(rowsByKey.values()).sort((left, right) => {
+    const leftIndex = STORE_AISLE_ORDER.indexOf(left.category);
+    const rightIndex = STORE_AISLE_ORDER.indexOf(right.category);
+    const safeLeftIndex = leftIndex === -1 ? STORE_AISLE_ORDER.length : leftIndex;
+    const safeRightIndex = rightIndex === -1 ? STORE_AISLE_ORDER.length : rightIndex;
+
+    if (safeLeftIndex !== safeRightIndex) {
+      return safeLeftIndex - safeRightIndex;
+    }
+
+    return left.ingredient.localeCompare(right.ingredient);
+  });
 }
 
 function buildReason(storeId, categoryCounts, wishlistSize) {
@@ -866,6 +899,7 @@ export function createShoppingPlan(dishes) {
     expectedPrice: row.shoppingAmount * row.basePrice * (recommendedStore.pricing[row.category] ?? 1),
     dishUsedIn: row.dishes.join(", "),
     category: row.category,
+    aisleLabel: STORE_AISLE_LABELS[row.category] || "Other",
   }));
 
   return {
@@ -1277,6 +1311,134 @@ export async function generateSyntheticRecipeCollection(prompt, category = "bala
       prompt,
     ))
     .filter(Boolean);
+}
+
+function normalizeReviewedGroceryRow(rawRow, fallbackRow) {
+  const ingredient = `${rawRow?.ingredient || fallbackRow?.ingredient || ""}`.trim();
+  const qty = `${rawRow?.qty || fallbackRow?.qty || ""}`.trim();
+  const dishUsedIn = `${rawRow?.dishUsedIn || fallbackRow?.dishUsedIn || ""}`.trim();
+  const category = cleanTag(rawRow?.category || fallbackRow?.category || "") || fallbackRow?.category || "pantry";
+  const aisleLabel = `${rawRow?.aisleLabel || fallbackRow?.aisleLabel || "Other"}`.trim();
+  const expectedPrice = Number.isFinite(Number(rawRow?.expectedPrice))
+    ? Number(rawRow.expectedPrice)
+    : Number(fallbackRow?.expectedPrice || 0);
+
+  if (!ingredient || !qty) {
+    return null;
+  }
+
+  return {
+    ingredientId: rawRow?.ingredientId || fallbackRow?.ingredientId || "",
+    ingredient,
+    qty,
+    expectedPrice,
+    dishUsedIn,
+    category,
+    aisleLabel,
+  };
+}
+
+export async function screenShoppingPlan(plan) {
+  const payload = await callGeminiChefApi({
+    mode: "shopping_review",
+    promptText: [
+      "You are reviewing a grocery list before it is shown to the user.",
+      "Clean up duplicates, merge obvious repeat ingredients, remove anomalies, and normalize wording.",
+      "Do not invent new ingredients.",
+      "Do not materially change pricing except when duplicate rows are merged.",
+      "Preserve realistic aisle grouping and keep the list concise and clean.",
+      `Input rows: ${JSON.stringify(plan.rows)}`,
+    ].join("\n"),
+  });
+
+  const fallbackRows = plan.rows || [];
+  const reviewedRows = (Array.isArray(payload.rows) ? payload.rows : [])
+    .map((row) => {
+      const fallback = fallbackRows.find((candidate) => normalizeName(candidate.ingredient) === normalizeName(row.ingredient));
+      return normalizeReviewedGroceryRow(row, fallback);
+    })
+    .filter(Boolean);
+
+  const nextRows = reviewedRows.length ? reviewedRows : fallbackRows;
+  const nextEstimatedTotal = nextRows.reduce((total, row) => total + Number(row.expectedPrice || 0), 0);
+
+  return {
+    plan: {
+      ...plan,
+      rows: nextRows,
+      recommendedStore: {
+        ...plan.recommendedStore,
+        estimatedTotal: nextEstimatedTotal || plan.recommendedStore.estimatedTotal,
+      },
+    },
+    note: `${payload.note || ""}`.trim(),
+  };
+}
+
+function getPantryCarryoverRatio(row) {
+  if (row.category === "specialty") {
+    if (row.unit === "bottle" || row.unit === "jar") return 0.7;
+    return 0.45;
+  }
+  if (row.category === "pantry") {
+    if (row.unit === "bag" || row.unit === "box" || row.unit === "pack") return 0.45;
+    if (row.unit === "bottle" || row.unit === "jar") return 0.7;
+    if (row.unit === "can") return 0.15;
+    return 0.35;
+  }
+  return 0;
+}
+
+function buildFallbackPantryCarryover(rows) {
+  return rows
+    .filter((row) => ["pantry", "specialty"].includes(row.category))
+    .map((row) => ({
+      ingredientId: row.ingredientId || "",
+      ingredient: row.ingredient,
+      amount: Number((row.amount * getPantryCarryoverRatio(row)).toFixed(2)),
+      unit: row.unit,
+      category: row.category,
+      reason: "Durable pantry staple or seasoning likely to remain after normal weekly cooking.",
+    }))
+    .filter((row) => row.amount > 0.05);
+}
+
+export async function screenPantryCarryover(rows) {
+  const fallbackCarryover = buildFallbackPantryCarryover(rows);
+
+  const payload = await callGeminiChefApi({
+    mode: "pantry_review",
+    promptText: [
+      "Review which leftover grocery items should be kept in pantry memory after this week's cooking.",
+      "Keep only realistically durable items like dry goods, oils, sauces, seasonings, canned goods, jarred goods, and similar long-life staples.",
+      "Exclude fresh produce, fresh herbs, raw proteins, most dairy, and other quickly perishable groceries.",
+      "Estimate a plausible leftover amount for only the durable items that would realistically remain after a normal week of cooking.",
+      `Input inventory rows: ${JSON.stringify(rows)}`,
+      `Fallback durable candidates: ${JSON.stringify(fallbackCarryover)}`,
+    ].join("\n"),
+  });
+
+  const reviewedCarryover = (Array.isArray(payload.carryover) ? payload.carryover : [])
+    .map((row) => {
+      const ingredient = `${row?.ingredient || ""}`.trim();
+      const unit = cleanMeasure(row?.unit || "piece");
+      const amount = Number(row?.amount);
+      const category = cleanTag(row?.category || "") || "pantry";
+      if (!ingredient || !Number.isFinite(amount) || amount <= 0) {
+        return null;
+      }
+      return {
+        ingredientId: row?.ingredientId || normalizeName(ingredient),
+        ingredient,
+        amount: Number(amount.toFixed(2)),
+        unit,
+        category,
+        reason: `${row?.reason || "Durable pantry item likely to remain after this week's cooking."}`.trim(),
+      };
+    })
+    .filter(Boolean);
+
+  return reviewedCarryover.length ? reviewedCarryover : fallbackCarryover;
 }
 
 export async function pushShoppingPlanToGoogleSheet(payload) {

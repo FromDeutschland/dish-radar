@@ -43,6 +43,56 @@ function buildCollectionSchema() {
   };
 }
 
+function buildShoppingReviewSchema() {
+  return {
+    type: "object",
+    properties: {
+      rows: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            ingredientId: { type: "string" },
+            ingredient: { type: "string" },
+            qty: { type: "string" },
+            expectedPrice: { type: "number" },
+            dishUsedIn: { type: "string" },
+            category: { type: "string" },
+            aisleLabel: { type: "string" },
+          },
+          required: ["ingredient", "qty", "expectedPrice", "dishUsedIn", "category", "aisleLabel"],
+        },
+      },
+      note: { type: "string" },
+    },
+    required: ["rows"],
+  };
+}
+
+function buildPantryReviewSchema() {
+  return {
+    type: "object",
+    properties: {
+      carryover: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            ingredientId: { type: "string" },
+            ingredient: { type: "string" },
+            amount: { type: "number" },
+            unit: { type: "string" },
+            category: { type: "string" },
+            reason: { type: "string" },
+          },
+          required: ["ingredient", "amount", "unit", "category", "reason"],
+        },
+      },
+    },
+    required: ["carryover"],
+  };
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -126,7 +176,8 @@ export default async function handler(request, response) {
   }
 
   const body = typeof request.body === "string" ? JSON.parse(request.body || "{}") : (request.body || {});
-  const mode = body.mode === "single" ? "single" : "collection";
+  const supportedModes = new Set(["single", "collection", "shopping_review", "pantry_review"]);
+  const mode = supportedModes.has(body.mode) ? body.mode : "collection";
   const promptText = readPrompt(body);
 
   if (!promptText) {
@@ -135,7 +186,13 @@ export default async function handler(request, response) {
   }
 
   try {
-    const schema = mode === "single" ? buildSingleSchema() : buildCollectionSchema();
+    const schema = mode === "single"
+      ? buildSingleSchema()
+      : mode === "shopping_review"
+        ? buildShoppingReviewSchema()
+        : mode === "pantry_review"
+          ? buildPantryReviewSchema()
+          : buildCollectionSchema();
     const result = await callWithRetry({ apiKey, promptText, schema });
 
     if (!result?.ok) {
