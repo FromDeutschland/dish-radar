@@ -821,65 +821,6 @@ th {
   box-shadow: 0 24px 60px rgba(15, 23, 42, 0.18);
 }
 
-.ingredient-ribbon {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.ingredient-ribbon-header {
-  justify-content: flex-end;
-}
-
-.ingredient-ribbon-produce,
-.ingredient-ribbon-garden,
-.ingredient-ribbon-citrus {
-  margin-top: 10px;
-}
-
-.ingredient-card {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 8px 10px;
-  border-radius: 14px;
-  border: 1px solid rgba(120, 156, 104, 0.18);
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(245, 255, 240, 0.96));
-  box-shadow: 0 10px 22px rgba(69, 102, 63, 0.07);
-}
-
-.ingredient-ribbon-header .ingredient-card {
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.18);
-  box-shadow: none;
-}
-
-.ingredient-emoji {
-  display: inline-grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: rgba(190, 242, 100, 0.18);
-  font-size: 0.92rem;
-}
-
-.ingredient-ribbon-header .ingredient-emoji {
-  background: rgba(255, 255, 255, 0.16);
-}
-
-.ingredient-label {
-  color: var(--luxury-black);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-}
-
-.ingredient-ribbon-header .ingredient-label {
-  color: rgba(248, 255, 249, 0.92);
-}
-
 .help-modal-card {
   width: min(640px, 100%);
 }
@@ -1609,7 +1550,4 @@ th {
     text-align: left;
   }
 
-  .ingredient-ribbon-header {
-    justify-content: flex-start;
-  }
 }

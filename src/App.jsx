@@ -54,13 +54,6 @@ const CATEGORY_OPTIONS = [
 const CATEGORY_LABELS = Object.fromEntries(CATEGORY_OPTIONS.map((option) => [option.value, option.label]));
 const VALID_TAB_VALUES = new Set(TABS.map((tab) => tab.value));
 const SHEET_URL = "https://docs.google.com/spreadsheets/d/1Tk4ny0z2fEUUquuvBwBpLQMhTt9BsGpep69l0RmvxmE/edit?gid=0#gid=0";
-const HEADER_INGREDIENTS = [
-  { emoji: "🥑", label: "Avocado" },
-  { emoji: "🍋", label: "Citrus" },
-  { emoji: "🥬", label: "Greens" },
-  { emoji: "🍅", label: "Tomatoes" },
-  { emoji: "🫒", label: "Olives" },
-];
 function safeRead(key, fallback) {
   try {
     const value = window.localStorage.getItem(key);
@@ -188,19 +181,6 @@ function groupRowsByAisle(rows) {
   });
 
   return Array.from(groups.entries()).map(([aisle, items]) => ({ aisle, items }));
-}
-
-function IngredientRibbon({ items, tone = "fresh" }) {
-  return (
-    <div className={`ingredient-ribbon ingredient-ribbon-${tone}`} aria-hidden="true">
-      {items.map((item) => (
-        <div key={`${item.label}-${item.emoji}`} className="ingredient-card">
-          <span className="ingredient-emoji">{item.emoji}</span>
-          <span className="ingredient-label">{item.label}</span>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 function App() {
@@ -799,9 +779,9 @@ function App() {
                   ))}
                 </div>
 
-                <button className="hero-shop-button" onClick={() => setActiveTab("groceries")}>
+                <button className="hero-shop-button" onClick={handleGoShop} disabled={isScreeningShoppingPlan}>
                   <span>GO SHOP</span>
-                  <small>Open the sorted grocery list for this week.</small>
+                  <small>{isScreeningShoppingPlan ? "Final grocery cleanup is running." : "Lock this week, save recipes, and build groceries."}</small>
                 </button>
               </>
             ) : (
@@ -827,8 +807,6 @@ function App() {
               </div>
               {lockedWeek ? <span className="chip">{new Date(lockedWeek.createdAt).toLocaleDateString("en-US")}</span> : null}
             </div>
-
-            <IngredientRibbon items={HEADER_INGREDIENTS} tone="garden" />
 
             {lockedWeek?.entries?.length ? (
               <div className="recipe-grid">
@@ -913,8 +891,6 @@ function App() {
               </div>
               {visibleShoppingView?.plan ? <strong>{formatCurrency(visibleShoppingView.plan.recommendedStore.estimatedTotal)}</strong> : null}
             </div>
-
-            <IngredientRibbon items={HEADER_INGREDIENTS} tone="citrus" />
 
             {visibleShoppingView?.plan ? (
               <>
