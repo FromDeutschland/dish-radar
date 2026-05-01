@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   buildGoogleSheetPayload,
+  buildFallbackPantryCarryover,
+  cleanShoppingPlan,
   createShoppingPlan,
   estimateDishCalories,
   extractPreferenceKeywords,
@@ -9,8 +11,6 @@ import {
   formatIngredientDisplay,
   generateSyntheticRecipeCollection,
   pushShoppingPlanToGoogleSheet,
-  screenPantryCarryover,
-  screenShoppingPlan,
   sanitizeStoredDishes,
 } from "./storeLogic";
 
@@ -50,6 +50,8 @@ const CATEGORY_OPTIONS = [
   { value: "handhelds-casual", label: "Handhelds & Casual" },
   { value: "soups-stews-chilis", label: "Soups, Stews & Chilis" },
 ];
+
+const FAST_DISH_BATCH_SIZE = 10;
 
 const CATEGORY_LABELS = Object.fromEntries(CATEGORY_OPTIONS.map((option) => [option.value, option.label]));
 const VALID_TAB_VALUES = new Set(TABS.map((tab) => tab.value));
@@ -197,13 +199,6 @@ function App() {
   const [dayPicker, setDayPicker] = useState(() => createEmptyDayPicker());
   const [generationJobs, setGenerationJobs] = useState({});
   const [exportMessage, setExportMessage] = useState("");
-  const [screenedPlanState, setScreenedPlanState] = useState({
-    signature: "",
-    loading: false,
-    plan: null,
-    note: "",
-    error: "",
-  });
 
   const weekDays = getCurrentWeekDates();
   const biasKeywords = useMemo(() => extractPreferenceKeywords(ratingHistory), [ratingHistory]);
@@ -240,18 +235,12 @@ function App() {
   );
 
   const currentShoppingPlan = useMemo(
-    () => (selectedDayEntries.length ? createShoppingPlan(selectedDayEntries.map((entry) => entry.dish)) : null),
+    () => (selectedDayEntries.length
+      ? cleanShoppingPlan(createShoppingPlan(selectedDayEntries.map((entry) => entry.dish)))
+      : null),
     [selectedDayEntries],
   );
-  const livePlanSignature = useMemo(
-    () => selectedDayEntries.map((entry) => `${entry.dayKey}:${entry.dish.id}`).join("|"),
-    [selectedDayEntries],
-  );
-  const screenedCurrentShoppingPlan = screenedPlanState.signature === livePlanSignature
-    ? screenedPlanState.plan
-    : null;
-  const isScreeningShoppingPlan = Boolean(currentShoppingPlan)
-    && (screenedPlanState.loading || !screenedCurrentShoppingPlan);
+  const screenedCurrentShoppingPlan = currentShoppingPlan;
 
   const visibleShoppingView = currentShoppingPlan
     ? {
@@ -305,61 +294,6 @@ function App() {
   useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.pantryCarryover, JSON.stringify(pantryCarryover));
   }, [pantryCarryover]);
-
-  useEffect(() => {
-    if (!currentShoppingPlan || !livePlanSignature) {
-      setScreenedPlanState({
-        signature: "",
-        loading: false,
-        plan: null,
-        note: "",
-        error: "",
-      });
-      return;
-    }
-
-    let cancelled = false;
-
-    setScreenedPlanState({
-      signature: livePlanSignature,
-      loading: true,
-      plan: null,
-      note: "",
-      error: "",
-    });
-
-    screenShoppingPlan(currentShoppingPlan)
-      .then((result) => {
-        if (cancelled) {
-          return;
-        }
-
-        setScreenedPlanState({
-          signature: livePlanSignature,
-          loading: false,
-          plan: result.plan,
-          note: result.note || "Gemini reviewed this grocery list for duplicates and odd rows.",
-          error: "",
-        });
-      })
-      .catch((error) => {
-        if (cancelled) {
-          return;
-        }
-
-        setScreenedPlanState({
-          signature: livePlanSignature,
-          loading: false,
-          plan: currentShoppingPlan,
-          note: "",
-          error: error.message || "Gemini could not review this grocery list right now.",
-        });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [currentShoppingPlan, livePlanSignature]);
 
   function persistGeneratedDishes(category, dishes) {
     const sanitized = sanitizeStoredDishes(dishes);
@@ -425,7 +359,7 @@ function App() {
         options: mergedOptions,
         notice: initialOptions.length
           ? `Loaded ${initialOptions.length} saved dishes and added ${Math.max(0, mergedOptions.length - initialOptions.length)} fresh ones.`
-          : "20 Gemini dishes are ready.",
+          : "Gemini dishes are ready.",
         error: "",
       }));
     } catch (error) {
@@ -467,7 +401,9 @@ function App() {
 
     const cachedOptions = getPoolDishes(category);
     const preload = cachedOptions.slice(0, 20);
-    const requestedCount = preload.length >= 20 ? 0 : Math.max(20 - preload.length, 10);
+    const requestedCount = preload.length >= FAST_DISH_BATCH_SIZE
+      ? 0
+      : Math.max(FAST_DISH_BATCH_SIZE - preload.length, 6);
     const startedAt = Date.now();
 
     setGenerationJobs((current) => ({
@@ -508,7 +444,7 @@ function App() {
           }),
         };
       });
-    }, 45000);
+    }, 10000);
 
     await fillDayPicker({
       dayName,
@@ -616,7 +552,7 @@ function App() {
       ...current,
       loading: true,
       error: "",
-      notice: "Gemini Chef is curating 20 dishes from your search...",
+      notice: "Gemini Chef is curating fast dish options from your search...",
     }));
     setGenerationJobs((current) => ({
       ...current,
@@ -631,7 +567,7 @@ function App() {
       dayName: dayPicker.dayName,
       category: dayPicker.category,
       initialOptions: existingOptions,
-      requestedCount: 20,
+      requestedCount: FAST_DISH_BATCH_SIZE,
       searchText: dayPicker.searchQuery,
     });
   }
@@ -660,7 +596,7 @@ function App() {
   async function handleGoShop() {
     const finalPlan = screenedCurrentShoppingPlan || currentShoppingPlan;
 
-    if (!finalPlan || !selectedDayEntries.length || isScreeningShoppingPlan) {
+    if (!finalPlan || !selectedDayEntries.length) {
       return;
     }
 
@@ -696,12 +632,7 @@ function App() {
       nextExportMessage = error.message || "Google Sheet export failed.";
     }
 
-    try {
-      const reviewedCarryover = await screenPantryCarryover(finalPlan.inventoryRows);
-      setPantryCarryover(reviewedCarryover);
-    } catch {
-      setPantryCarryover([]);
-    }
+    setPantryCarryover(buildFallbackPantryCarryover(finalPlan.inventoryRows));
 
     setLockedWeek({
       id: `${Date.now()}`,
@@ -848,9 +779,9 @@ function App() {
                   ))}
                 </div>
 
-                <button className="hero-shop-button" onClick={handleGoShop} disabled={isScreeningShoppingPlan}>
+                <button className="hero-shop-button" onClick={handleGoShop}>
                   <span>GO SHOP</span>
-                  <small>{isScreeningShoppingPlan ? "Final grocery cleanup is running." : "Lock this week, save recipes, and build groceries."}</small>
+                  <small>Lock this week, save recipes, and build groceries.</small>
                 </button>
               </>
             ) : (
@@ -979,14 +910,8 @@ function App() {
                 </div>
 
                 <p className="summary-copy">{visibleShoppingView.plan.recommendedStore.reason}</p>
-                {visibleShoppingView.live && isScreeningShoppingPlan ? (
-                  <p className="summary-copy subtle">Gemini is screening this grocery list for duplicates and anomalies before you publish it.</p>
-                ) : null}
-                {visibleShoppingView.live && screenedPlanState.note ? (
-                  <p className="summary-copy subtle">{screenedPlanState.note}</p>
-                ) : null}
-                {visibleShoppingView.live && screenedPlanState.error ? (
-                  <p className="summary-copy subtle">{screenedPlanState.error}</p>
+                {visibleShoppingView.live ? (
+                  <p className="summary-copy subtle">Fast cleanup applied instantly: duplicates are merged, aisles are sorted, and prices are recalculated locally.</p>
                 ) : null}
                 {!visibleShoppingView.live && pantryCarryover.length ? (
                   <p className="summary-copy subtle">
@@ -1029,8 +954,8 @@ function App() {
 
                 {visibleShoppingView.live ? (
                   <div className="side-actions compact-actions">
-                    <button className="action-button wide" onClick={handleGoShop} disabled={isScreeningShoppingPlan}>
-                      {isScreeningShoppingPlan ? "Checking list..." : "GO SHOP"}
+                    <button className="action-button wide" onClick={handleGoShop}>
+                      GO SHOP
                     </button>
                   </div>
                 ) : null}
@@ -1082,7 +1007,7 @@ function App() {
                 onChange={(event) => setDayPicker((current) => ({ ...current, searchQuery: event.target.value }))}
               />
               <button className="action-button" onClick={curateSearch} disabled={dayPicker.loading}>
-                {dayPicker.loading ? "Curating..." : "Curate 20"}
+                {dayPicker.loading ? "Curating..." : "Curate fast"}
               </button>
             </div>
             {dayPicker.notice ? <p className="picker-note">{dayPicker.notice}</p> : null}

@@ -1,7 +1,7 @@
 const GEMINI_MODEL_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
 export const config = {
-  maxDuration: 30,
+  maxDuration: 10,
 };
 
 function buildSingleSchema() {
@@ -106,44 +106,63 @@ function readPrompt(body) {
   return `${body?.promptText || ""}`.trim();
 }
 
-async function callGeminiApi({ apiKey, promptText, schema }) {
-  const response = await fetch(GEMINI_MODEL_URL, {
-    method: "POST",
-    headers: {
-      "x-goog-api-key": apiKey,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      contents: [
-        {
-          parts: [
-            {
-              text: promptText,
-            },
-          ],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseJsonSchema: schema,
-      },
-    }),
-  });
+async function callGeminiApi({ apiKey, promptText, schema, maxOutputTokens = 8192 }) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 9000);
 
-  const data = await response.json().catch(() => ({}));
-  return {
-    ok: response.ok,
-    status: response.status,
-    data,
-  };
+  try {
+    const response = await fetch(GEMINI_MODEL_URL, {
+      method: "POST",
+      headers: {
+        "x-goog-api-key": apiKey,
+        "Content-Type": "application/json",
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              {
+                text: promptText,
+              },
+            ],
+          },
+        ],
+        generationConfig: {
+          responseMimeType: "application/json",
+          responseJsonSchema: schema,
+          maxOutputTokens,
+        },
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    return {
+      ok: response.ok,
+      status: response.status,
+      data,
+    };
+  } catch (error) {
+    if (error?.name === "AbortError") {
+      return {
+        ok: false,
+        status: 408,
+        data: { error: { message: "Gemini Chef exceeded the 9 second speed budget." } },
+      };
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
-async function callWithRetry({ apiKey, promptText, schema }) {
-  const delays = [250, 900, 1800];
+async function callWithRetry({ apiKey, promptText, schema, maxOutputTokens }) {
+  const delays = [];
   let lastResult = null;
 
   for (let attempt = 0; attempt < delays.length + 1; attempt += 1) {
-    const result = await callGeminiApi({ apiKey, promptText, schema });
+    const result = await callGeminiApi({ apiKey, promptText, schema, maxOutputTokens });
     lastResult = result;
 
     if (result.ok) {
@@ -198,7 +217,8 @@ export default async function handler(request, response) {
         : mode === "pantry_review"
           ? buildPantryReviewSchema()
           : buildCollectionSchema();
-    const result = await callWithRetry({ apiKey, promptText, schema });
+    const maxOutputTokens = mode === "collection" ? 8192 : 4096;
+    const result = await callWithRetry({ apiKey, promptText, schema, maxOutputTokens });
 
     if (!result?.ok) {
       const upstreamMessage = result?.data?.error?.message || "";

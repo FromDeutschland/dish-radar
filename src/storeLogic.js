@@ -957,6 +957,83 @@ export function createShoppingPlan(dishes) {
   };
 }
 
+export function cleanShoppingPlan(plan) {
+  const rowsByKey = new Map();
+
+  (plan?.rows || []).forEach((row) => {
+    const ingredient = `${row.ingredient || ""}`.trim();
+    const qty = `${row.qty || ""}`.replace(/\s+/g, " ").trim();
+    if (!ingredient || !qty) {
+      return;
+    }
+
+    const category = row.category || "pantry";
+    const aisleLabel = row.aisleLabel || STORE_AISLE_LABELS[category] || "Other";
+    const key = `${normalizeName(ingredient)}::${normalizeName(qty)}::${category}`;
+    const existing = rowsByKey.get(key);
+    const dishes = `${row.dishUsedIn || ""}`
+      .split(",")
+      .map((dishName) => dishName.trim())
+      .filter(Boolean);
+
+    if (existing) {
+      existing.expectedPrice += Number(row.expectedPrice || 0);
+      dishes.forEach((dishName) => {
+        if (!existing.dishes.includes(dishName)) {
+          existing.dishes.push(dishName);
+        }
+      });
+      return;
+    }
+
+    rowsByKey.set(key, {
+      ingredientId: row.ingredientId || normalizeName(ingredient),
+      ingredient,
+      qty,
+      expectedPrice: Number(row.expectedPrice || 0),
+      dishUsedIn: "",
+      dishes,
+      category,
+      aisleLabel,
+    });
+  });
+
+  const rows = Array.from(rowsByKey.values())
+    .map((row) => {
+      const { dishes, ...cleanRow } = row;
+      return {
+        ...cleanRow,
+        expectedPrice: Number(row.expectedPrice.toFixed(2)),
+        dishUsedIn: dishes.join(", "),
+      };
+    })
+    .sort((left, right) => {
+      const leftIndex = STORE_AISLE_ORDER.indexOf(left.category);
+      const rightIndex = STORE_AISLE_ORDER.indexOf(right.category);
+      const safeLeftIndex = leftIndex === -1 ? STORE_AISLE_ORDER.length : leftIndex;
+      const safeRightIndex = rightIndex === -1 ? STORE_AISLE_ORDER.length : rightIndex;
+
+      if (safeLeftIndex !== safeRightIndex) {
+        return safeLeftIndex - safeRightIndex;
+      }
+
+      return left.ingredient.localeCompare(right.ingredient);
+    });
+  const estimatedTotal = Number(rows.reduce((total, row) => total + Number(row.expectedPrice || 0), 0).toFixed(2));
+
+  return {
+    ...plan,
+    rows,
+    recommendedStore: {
+      ...plan.recommendedStore,
+      estimatedTotal,
+    },
+    storeRanking: (plan.storeRanking || []).map((store, index) => (
+      index === 0 ? { ...store, estimatedTotal } : store
+    )),
+  };
+}
+
 export function buildGoogleSheetPayload(plan, metadata = {}) {
   return {
     linkedSheetUrl: metadata.linkedSheetUrl ?? GOOGLE_SHEET_URL,
@@ -1259,13 +1336,13 @@ function buildGeminiRecipePrompt(prompt, category) {
     "Return only JSON that matches the supplied schema.",
     "Use realistic quantities for 2 to 4 servings.",
     "Set calories to a realistic positive estimate for the entire recipe based on the raw ingredients. Never return 0 calories.",
-    "Write instructions as one string with numbered steps.",
+    "Write instructions as one compact string with 3 to 4 numbered steps.",
     "Make the dish feel polished, practical, and appealing for home cooking.",
   ].join("\n");
 }
 
 async function callGeminiChefApi(body) {
-  const delays = [0, 700, 1800];
+  const delays = [0];
   let lastError = null;
 
   for (const delay of delays) {
@@ -1274,7 +1351,7 @@ async function callGeminiChefApi(body) {
     }
 
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 35000);
+    const timeoutId = window.setTimeout(() => controller.abort(), 9500);
 
     try {
       const response = await fetch("/api/gemini-chef", {
@@ -1373,6 +1450,7 @@ export async function generateSyntheticRecipeCollection(prompt, category = "bala
     promptText: [
       buildGeminiRecipePrompt(prompt, category),
       `Create ${count} distinct recipe options for this prompt instead of one.`,
+      "Keep each recipe compact: 6 to 9 ingredients and 3 to 4 concise numbered instruction steps.",
       "Vary the proteins, sauces, aromatics, or produce so the dish options feel genuinely different from each other.",
     ].join("\n"),
   });
@@ -1465,7 +1543,7 @@ function getPantryCarryoverRatio(row) {
   return 0;
 }
 
-function buildFallbackPantryCarryover(rows) {
+export function buildFallbackPantryCarryover(rows) {
   return rows
     .filter((row) => ["pantry", "specialty"].includes(row.category))
     .map((row) => ({
