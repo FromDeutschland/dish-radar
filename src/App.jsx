@@ -147,6 +147,7 @@ function createGenerationJob(category, overrides = {}) {
     ready: false,
     optionCount: 0,
     error: "",
+    startedAt: Date.now(),
     ...overrides,
   };
 }
@@ -381,9 +382,12 @@ function App() {
   }
 
   function getPoolDishes(category) {
-    return (generatedPools[category] || [])
+    const pooledDishes = (generatedPools[category] || [])
       .map((dishId) => dishLookup[dishId])
       .filter(Boolean);
+    const catalogMatches = searchableDishLibrary.filter((dish) => dish.category === category);
+
+    return uniqById([...pooledDishes, ...catalogMatches]);
   }
 
   async function fillDayPicker({ dayName, category, initialOptions = [], requestedCount, searchText = "" }) {
@@ -462,17 +466,21 @@ function App() {
     }
 
     const cachedOptions = getPoolDishes(category);
-    const preload = cachedOptions.slice(0, 10);
-    const requestedCount = preload.length >= 10 ? 10 : Math.max(20 - preload.length, 10);
+    const preload = cachedOptions.slice(0, 20);
+    const requestedCount = preload.length >= 20 ? 0 : Math.max(20 - preload.length, 10);
 
     setGenerationJobs((current) => ({
       ...current,
       [dayName]: createGenerationJob(category, {
-        loading: true,
+        loading: requestedCount > 0,
         ready: preload.length > 0,
         optionCount: preload.length,
       }),
     }));
+
+    if (!requestedCount) {
+      return;
+    }
 
     await fillDayPicker({
       dayName,
