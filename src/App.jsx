@@ -994,8 +994,6 @@ function App() {
             </button>
           ))}
         </nav>
-
-        <IngredientRibbon items={HEADER_INGREDIENTS} tone="header" />
       </header>
 
       <main className="content-shell">
