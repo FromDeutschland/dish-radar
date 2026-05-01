@@ -468,6 +468,7 @@ function App() {
     const cachedOptions = getPoolDishes(category);
     const preload = cachedOptions.slice(0, 20);
     const requestedCount = preload.length >= 20 ? 0 : Math.max(20 - preload.length, 10);
+    const startedAt = Date.now();
 
     setGenerationJobs((current) => ({
       ...current,
@@ -475,12 +476,39 @@ function App() {
         loading: requestedCount > 0,
         ready: preload.length > 0,
         optionCount: preload.length,
+        startedAt,
       }),
     }));
 
     if (!requestedCount) {
       return;
     }
+
+    window.setTimeout(() => {
+      setGenerationJobs((current) => {
+        const existingJob = current[dayName];
+        if (
+          !existingJob
+          || existingJob.category !== category
+          || !existingJob.loading
+          || existingJob.startedAt !== startedAt
+        ) {
+          return current;
+        }
+
+        return {
+          ...current,
+          [dayName]: createGenerationJob(category, {
+            ready: preload.length > 0,
+            optionCount: preload.length,
+            error: preload.length
+              ? ""
+              : "Gemini Chef is taking longer than expected. Open the picker and retry.",
+            updatedAt: Date.now(),
+          }),
+        };
+      });
+    }, 45000);
 
     await fillDayPicker({
       dayName,
@@ -500,11 +528,23 @@ function App() {
     const dayJob = generationJobs[dayName];
     const jobMatchesCategory = dayJob?.category === category;
 
-    if (!cachedOptions.length && !(jobMatchesCategory && dayJob?.ready)) {
-      if (!dayJob?.loading) {
+    if (!cachedOptions.length) {
+      const shouldStartJob = !jobMatchesCategory || (!dayJob?.loading && !dayJob?.error);
+      if (shouldStartJob) {
         startDayDishGeneration(dayName, category);
       }
-      setDayPicker(createEmptyDayPicker());
+
+      setDayPicker({
+        dayName,
+        category,
+        options: [],
+        loading: shouldStartJob || Boolean(jobMatchesCategory && dayJob?.loading),
+        error: jobMatchesCategory ? dayJob?.error || "" : "",
+        searchQuery: "",
+        notice: shouldStartJob || (jobMatchesCategory && dayJob?.loading)
+          ? "Gemini Chef is still building dish ideas. You can wait here, close this, or retry in a moment."
+          : "Gemini Chef is preparing this category now.",
+      });
       return;
     }
 
@@ -758,14 +798,13 @@ function App() {
                             <button
                               className="action-button wide"
                               onClick={() => openDayDishPicker(day.key, category)}
-                              disabled={isGeneratingForDay && !isReadyForDay}
                             >
                               Choose dish
                             </button>
                             {isGeneratingForDay ? (
                               <div className={`day-generation-status ${cachedOptionCount ? "ready" : "loading"}`}>
                                 <span>{cachedOptionCount ? "✓" : "•"}</span>
-                                {cachedOptionCount ? "Ready, adding more ideas" : "Curating dish ideas..."}
+                                {cachedOptionCount ? "Ready, adding more ideas" : "Generating. Click to wait or retry."}
                               </div>
                             ) : isReadyForDay ? (
                               <button className="day-generation-status ready clickable" onClick={() => openDayDishPicker(day.key, category)}>
