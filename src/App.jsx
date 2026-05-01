@@ -61,13 +61,6 @@ const HEADER_INGREDIENTS = [
   { emoji: "🍅", label: "Tomatoes" },
   { emoji: "🫒", label: "Olives" },
 ];
-const PLANNER_INGREDIENTS = [
-  { emoji: "🥕", label: "Fresh produce" },
-  { emoji: "🍄", label: "Good texture" },
-  { emoji: "🌿", label: "Bright herbs" },
-  { emoji: "🧄", label: "Big flavor" },
-];
-
 function safeRead(key, fallback) {
   try {
     const value = window.localStorage.getItem(key);
@@ -664,17 +657,6 @@ function App() {
     return (
       <div className="workspace single-column-layout">
         <section className="main-column">
-          <section className="panel planner-hero-panel">
-            <div className="planner-hero-copy">
-              <div className="eyebrow">Fresh week, simple choices</div>
-              <h2>Build a colorful week of dinners that feels healthy, easy, and fun.</h2>
-              <p className="summary-copy">
-                Pick the dish type for each day, then let Gemini Chef fill in polished ideas with fresh ingredients and a lighter, produce-forward feel.
-              </p>
-            </div>
-            <IngredientRibbon items={PLANNER_INGREDIENTS} tone="produce" />
-          </section>
-
           <section className="panel">
             <div className="panel-head">
               <div>
