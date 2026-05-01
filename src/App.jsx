@@ -475,7 +475,7 @@ function App() {
     }
   }
 
-  async function openDayDishPicker(dayName, category) {
+  async function startDayDishGeneration(dayName, category) {
     if (!category) {
       setDayPicker(createEmptyDayPicker());
       return;
@@ -494,23 +494,42 @@ function App() {
       }),
     }));
 
-    setDayPicker({
-      dayName,
-      category,
-      options: preload,
-      loading: true,
-      error: "",
-      searchQuery: "",
-      notice: preload.length
-        ? `Loaded ${preload.length} saved dishes instantly. Adding ${requestedCount} new ones...`
-        : "Gemini Chef is generating 20 dishes for this category...",
-    });
-
     await fillDayPicker({
       dayName,
       category,
       initialOptions: preload,
       requestedCount,
+    });
+  }
+
+  function openDayDishPicker(dayName, category) {
+    if (!category) {
+      setDayPicker(createEmptyDayPicker());
+      return;
+    }
+
+    const cachedOptions = getPoolDishes(category);
+    const dayJob = generationJobs[dayName];
+    const jobMatchesCategory = dayJob?.category === category;
+
+    if (!cachedOptions.length && !(jobMatchesCategory && dayJob?.ready)) {
+      if (!dayJob?.loading) {
+        startDayDishGeneration(dayName, category);
+      }
+      setDayPicker(createEmptyDayPicker());
+      return;
+    }
+
+    setDayPicker({
+      dayName,
+      category,
+      options: cachedOptions.slice(0, 20),
+      loading: Boolean(jobMatchesCategory && dayJob?.loading),
+      error: "",
+      searchQuery: "",
+      notice: jobMatchesCategory && dayJob?.loading
+        ? "Showing ready dishes now. Gemini Chef is still adding more ideas quietly."
+        : "Gemini dishes are ready.",
     });
   }
 
@@ -529,7 +548,8 @@ function App() {
     });
 
     if (category) {
-      openDayDishPicker(dayName, category);
+      setDayPicker(createEmptyDayPicker());
+      startDayDishGeneration(dayName, category);
     } else {
       setDayPicker(createEmptyDayPicker());
     }
@@ -725,7 +745,11 @@ function App() {
                           </div>
                         ) : (
                           <>
-                            <button className="action-button wide" onClick={() => openDayDishPicker(day.key, category)}>
+                            <button
+                              className="action-button wide"
+                              onClick={() => openDayDishPicker(day.key, category)}
+                              disabled={isGeneratingForDay && !isReadyForDay}
+                            >
                               Choose dish
                             </button>
                             {isGeneratingForDay ? (
