@@ -7,6 +7,7 @@ function buildSingleSchema() {
       id: { type: "string" },
       name: { type: "string" },
       category: { type: "string" },
+      calories: { type: "integer" },
       instructions: { type: "string" },
       ingredients: {
         type: "array",
@@ -26,7 +27,7 @@ function buildSingleSchema() {
         required: ["isAI"],
       },
     },
-    required: ["name", "category", "instructions", "ingredients", "meta"],
+    required: ["name", "category", "calories", "instructions", "ingredients", "meta"],
   };
 }
 

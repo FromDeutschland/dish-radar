@@ -101,6 +101,35 @@ const EXACT_INGREDIENT_CALORIES = {
   cheese: 640,
 };
 
+const INGREDIENT_CALORIE_RULES = [
+  { match: /(olive oil|avocado oil|sesame oil|vegetable oil|canola oil|oil\b)/, unitCalories: { tsp: 40, tbsp: 119, cup: 1900, ml: 8.1, bottle: 1900 } },
+  { match: /butter/, unitCalories: { tsp: 34, tbsp: 102, cup: 1628, g: 7.2, oz: 203, piece: 102 } },
+  { match: /(lentil|lentils)/, unitCalories: { cup: 230, g: 1.16, oz: 33, lb: 526, can: 350 } },
+  { match: /(black bean|kidney bean|pinto bean|white bean|bean\b)/, unitCalories: { cup: 227, g: 1.3, oz: 37, lb: 590, can: 330 } },
+  { match: /(chickpea|garbanzo)/, unitCalories: { cup: 269, g: 1.64, oz: 46, lb: 744, can: 390 } },
+  { match: /(sweet potato|yam)/, unitCalories: { piece: 112, cup: 180, g: 0.86, oz: 24, lb: 390 } },
+  { match: /(potato|russet|yukon)/, unitCalories: { piece: 160, cup: 116, g: 0.77, oz: 22, lb: 350 } },
+  { match: /(rice|jasmine rice|basmati|brown rice)/, unitCalories: { cup: 205, g: 1.3, oz: 37, lb: 590, bag: 1600 } },
+  { match: /(pasta|spaghetti|noodle|rigatoni|penne|pappardelle|linguine)/, unitCalories: { cup: 220, g: 3.7, oz: 105, lb: 1680, box: 1680 } },
+  { match: /(quinoa|farro|barley|couscous|bulgur)/, unitCalories: { cup: 220, g: 1.2, oz: 34, lb: 544, bag: 1200 } },
+  { match: /(flour|breadcrumb|panko)/, unitCalories: { cup: 455, tbsp: 28, g: 3.6, oz: 102, lb: 1630 } },
+  { match: /(sugar|honey|maple syrup|agave)/, unitCalories: { tsp: 21, tbsp: 64, cup: 1030, g: 3.0, oz: 85, jar: 960 } },
+  { match: /(peanut butter|almond butter|tahini)/, unitCalories: { tbsp: 95, cup: 1520, g: 5.9, oz: 167, jar: 2600 } },
+  { match: /(almond|walnut|cashew|pecan|peanut|nut\b|seed\b|sunflower seed|pumpkin seed)/, unitCalories: { tbsp: 52, cup: 760, g: 5.8, oz: 164, bag: 1200 } },
+  { match: /(chicken breast|chicken thigh|chicken)/, unitCalories: { piece: 250, cup: 335, g: 1.65, oz: 47, lb: 748 } },
+  { match: /(flank steak|skirt steak|steak|beef)/, unitCalories: { piece: 430, cup: 340, g: 2.2, oz: 62, lb: 998 } },
+  { match: /(ground turkey|turkey)/, unitCalories: { piece: 260, cup: 296, g: 1.75, oz: 50, lb: 794 } },
+  { match: /(pork|bacon|sausage)/, unitCalories: { piece: 320, cup: 360, g: 2.5, oz: 71, lb: 1134 } },
+  { match: /(salmon|tuna|cod|fish|sea bass|halibut)/, unitCalories: { fillet: 360, piece: 280, cup: 260, g: 2.0, oz: 57, lb: 907 } },
+  { match: /(shrimp|prawn)/, unitCalories: { cup: 240, g: 1.0, oz: 28, lb: 454 } },
+  { match: /(tofu|tempeh)/, unitCalories: { piece: 220, cup: 320, g: 1.6, oz: 45, lb: 726, pack: 640 } },
+  { match: /(egg|eggs)/, unitCalories: { piece: 72, large: 72 } },
+  { match: /(milk|yogurt|greek yogurt|cream|coconut milk)/, unitCalories: { cup: 150, tbsp: 20, g: 0.9, oz: 26, ml: 0.62, tub: 520, can: 445 } },
+  { match: /(cheddar|parmesan|mozzarella|feta|goat cheese|cheese)/, unitCalories: { cup: 440, tbsp: 28, g: 3.6, oz: 102, lb: 1630, block: 720 } },
+  { match: /(avocado)/, unitCalories: { piece: 240, cup: 234, g: 1.6, oz: 45 } },
+  { match: /(tomato|cucumber|lettuce|spinach|kale|greens|broccoli|cauliflower|zucchini|mushroom|pepper|carrot|onion|garlic|lemon|lime|herb|parsley|cilantro)/, unitCalories: { piece: 35, cup: 35, bunch: 20, clove: 4, handful: 12, g: 0.35, oz: 10, lb: 160 } },
+];
+
 const CATEGORY_UNIT_CALORIES = {
   bakery: { loaf: 1200, pack: 900, roll: 220, slice: 120 },
   dairy: { cup: 180, tub: 520, block: 620, pack: 520, piece: 140 },
@@ -435,9 +464,10 @@ export function formatCurrency(value) {
 }
 
 export function formatCalories(value) {
+  const safeValue = Number.isFinite(Number(value)) && Number(value) > 0 ? Number(value) : 1;
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: 0,
-  }).format(value);
+  }).format(safeValue);
 }
 
 function getBasePrice(category) {
@@ -735,7 +765,7 @@ function normalizeDishRecord(dish) {
     name: dish.name,
     category,
     time,
-    calories: Number.isFinite(Number(dish.calories)) ? Number(dish.calories) : null,
+    calories: Number.isFinite(Number(dish.calories)) && Number(dish.calories) > 0 ? Number(dish.calories) : null,
     trendNote: dish.trendNote || (meta.isAI ? "Bespoke AI recipe created by Gemini Chef." : "Recipe ready for this week’s plan."),
     sources: Array.isArray(dish.sources) && dish.sources.length ? dish.sources : [meta.isAI ? "Gemini Chef" : "Dish Radar"],
     cuisines: Array.isArray(dish.cuisines) ? dish.cuisines.filter(Boolean) : [],
@@ -752,7 +782,7 @@ export function sanitizeStoredDishes(dishes) {
 }
 
 function estimateIngredientCalories(ingredient) {
-  if (typeof ingredient.calories === "number") {
+  if (typeof ingredient.calories === "number" && ingredient.calories > 0) {
     return ingredient.calories;
   }
 
@@ -762,22 +792,29 @@ function estimateIngredientCalories(ingredient) {
     return ingredient.amount * exact;
   }
 
+  const rule = INGREDIENT_CALORIE_RULES.find((candidate) => candidate.match.test(exactKey));
+  const ruleCalories = rule?.unitCalories?.[ingredient.unit];
+  if (typeof ruleCalories === "number") {
+    return ingredient.amount * ruleCalories;
+  }
+
   const fallback = CATEGORY_UNIT_CALORIES[ingredient.category]?.[ingredient.unit];
   if (typeof fallback === "number") {
     return ingredient.amount * fallback;
   }
 
-  return ingredient.amount * 200;
+  return Math.max(ingredient.amount * 200, 25);
 }
 
 export function estimateDishCalories(dish) {
-  if (typeof dish.calories === "number" && Number.isFinite(dish.calories)) {
+  if (typeof dish.calories === "number" && Number.isFinite(dish.calories) && dish.calories > 0) {
     return Math.round(dish.calories / 10) * 10;
   }
 
-  return Math.round(
+  const ingredientEstimate = Math.round(
     ((dish.ingredients || []).reduce((total, ingredient) => total + estimateIngredientCalories(ingredient), 0)) / 10,
   ) * 10;
+  return Math.max(ingredientEstimate, 10);
 }
 
 function aggregateIngredients(dishes) {
@@ -1221,6 +1258,7 @@ function buildGeminiRecipePrompt(prompt, category) {
     `Target meal category: "${categoryLabel}".`,
     "Return only JSON that matches the supplied schema.",
     "Use realistic quantities for 2 to 4 servings.",
+    "Set calories to a realistic positive estimate for the entire recipe based on the raw ingredients. Never return 0 calories.",
     "Write instructions as one string with numbered steps.",
     "Make the dish feel polished, practical, and appealing for home cooking.",
   ].join("\n");
@@ -1263,6 +1301,7 @@ function normalizeSyntheticRecipe(payload, fallbackCategory, prompt) {
     name: payload.name || prompt,
     category,
     time: prepTimeMinutes,
+    calories: Number.isFinite(Number(payload.calories)) && Number(payload.calories) > 0 ? Number(payload.calories) : null,
     trendNote: "Bespoke AI recipe created by Gemini Chef for your personal library.",
     sources: ["Gemini Chef"],
     cuisines: payload.meta?.cuisine ? [payload.meta.cuisine] : [],
