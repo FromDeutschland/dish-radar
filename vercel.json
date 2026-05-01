@@ -1,0 +1,7 @@
+{
+  "functions": {
+    "api/gemini-chef.js": {
+      "maxDuration": 30
+    }
+  }
+}

@@ -562,12 +562,13 @@ function App() {
       return;
     }
 
+    const existingOptions = dayPicker.options;
+
     setDayPicker((current) => ({
       ...current,
       loading: true,
       error: "",
       notice: "Gemini Chef is curating 20 dishes from your search...",
-      options: [],
     }));
     setGenerationJobs((current) => ({
       ...current,
@@ -581,10 +582,31 @@ function App() {
     await fillDayPicker({
       dayName: dayPicker.dayName,
       category: dayPicker.category,
-      initialOptions: [],
+      initialOptions: existingOptions,
       requestedCount: 20,
       searchText: dayPicker.searchQuery,
     });
+  }
+
+  function retryDayPickerGeneration() {
+    if (!dayPicker.dayName || !dayPicker.category) {
+      return;
+    }
+
+    if (dayPicker.searchQuery.trim()) {
+      curateSearch();
+      return;
+    }
+
+    startDayDishGeneration(dayPicker.dayName, dayPicker.category);
+    setDayPicker((current) => ({
+      ...current,
+      loading: true,
+      error: "",
+      notice: current.options.length
+        ? "Keeping these dishes visible while Gemini Chef tries again."
+        : "Gemini Chef is trying again...",
+    }));
   }
 
   async function handleGoShop() {
@@ -1017,7 +1039,14 @@ function App() {
               </button>
             </div>
             {dayPicker.notice ? <p className="picker-note">{dayPicker.notice}</p> : null}
-            {dayPicker.error ? <p className="empty-copy">{dayPicker.error}</p> : null}
+            {dayPicker.error ? (
+              <div className="picker-error-box">
+                <p>{dayPicker.error}</p>
+                <button className="mini-button" onClick={retryDayPickerGeneration}>
+                  Retry Gemini
+                </button>
+              </div>
+            ) : null}
           </div>
 
           {dayPicker.options.length ? (

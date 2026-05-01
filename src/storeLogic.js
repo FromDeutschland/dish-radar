@@ -1265,23 +1265,60 @@ function buildGeminiRecipePrompt(prompt, category) {
 }
 
 async function callGeminiChefApi(body) {
-  const response = await fetch("/api/gemini-chef", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const delays = [0, 700, 1800];
+  let lastError = null;
 
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(data?.error || `Gemini Chef request failed (${response.status}).`);
-    error.status = response.status;
-    error.code = data?.code || "";
-    throw error;
+  for (const delay of delays) {
+    if (delay) {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+    }
+
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), 35000);
+
+    try {
+      const response = await fetch("/api/gemini-chef", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = new Error(data?.error || `Gemini Chef request failed (${response.status}).`);
+        error.status = response.status;
+        error.code = data?.code || "";
+
+        if (![408, 429, 500, 502, 503, 504].includes(response.status)) {
+          throw error;
+        }
+
+        lastError = error;
+        continue;
+      }
+
+      return data;
+    } catch (error) {
+      lastError = error;
+      if (error?.status && ![408, 429, 500, 502, 503, 504].includes(error.status)) {
+        throw error;
+      }
+    } finally {
+      window.clearTimeout(timeoutId);
+    }
   }
 
-  return data;
+  const friendlyError = new Error(
+    lastError?.name === "AbortError"
+      ? "Gemini Chef took too long to answer. Please retry in a moment."
+      : "Gemini Chef could not connect cleanly. Please retry in a moment.",
+  );
+  friendlyError.status = lastError?.status || 0;
+  friendlyError.code = lastError?.code || "NETWORK_RETRY_FAILED";
+  throw friendlyError;
 }
 
 function normalizeSyntheticRecipe(payload, fallbackCategory, prompt) {
