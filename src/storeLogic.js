@@ -436,6 +436,25 @@ function formatQty(amount, unit) {
   return `${formatQtyValue(amount)} ${unit}`;
 }
 
+function cleanInstructionStep(step) {
+  return `${step || ""}`
+    .replace(/^\s*(?:step\s*)?\d+[\).\s:-]+/i, "")
+    .replace(/\s+(?:step\s*)?\d+[\).]\s*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanIngredientName(value) {
+  return `${value || ""}`
+    .replace(/\([^)]*\)/g, "")
+    .replace(/\b(?:finely|roughly|thinly|coarsely)\s+(?:chopped|diced|minced|sliced|grated)\b/gi, "")
+    .replace(/\b(?:chopped|diced|minced|sliced|grated|shredded|crushed|peeled|seeded|cooked|raw|fresh)\b/gi, "")
+    .replace(/\bto taste\b/gi, "")
+    .replace(/\s*,\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function formatIngredientDisplay(ingredient) {
   if (!ingredient?.name) {
     return "";
@@ -443,16 +462,17 @@ export function formatIngredientDisplay(ingredient) {
 
   const amount = Number.isFinite(ingredient.amount) && ingredient.amount > 0 ? formatQtyValue(ingredient.amount) : "";
   const unit = cleanMeasure(ingredient.unit || "");
+  const name = cleanIngredientName(ingredient.name);
 
   if (!amount) {
-    return ingredient.name;
+    return name;
   }
 
   if (!unit || DISPLAY_OMIT_UNITS.has(unit)) {
-    return `${amount} ${ingredient.name}`.trim();
+    return `${amount} ${name}`.trim();
   }
 
-  return `${amount} ${unit} ${ingredient.name}`.trim();
+  return `${amount} ${unit} ${name}`.trim();
 }
 
 export function formatCurrency(value) {
@@ -669,7 +689,7 @@ function parseIngredientText(line) {
   const firstRest = rest[0];
   const useFirstAsUnit = isRecognizedIngredientUnit(firstRest);
   const unit = useFirstAsUnit ? cleanMeasure(firstRest) : "piece";
-  const name = (useFirstAsUnit ? rest.slice(1) : rest).join(" ").trim() || raw;
+  const name = cleanIngredientName((useFirstAsUnit ? rest.slice(1) : rest).join(" ").trim() || raw);
 
   return {
     name,
@@ -717,18 +737,19 @@ function normalizeIngredientRecord(rawIngredient) {
   }
 
   const name = `${rawIngredient.name || rawIngredient.ingredient || ""}`.trim();
-  if (!name) {
+  const cleanedName = cleanIngredientName(name);
+  if (!cleanedName) {
     return null;
   }
 
-  const parsedFromQty = rawIngredient.qty ? parseIngredientText(`${rawIngredient.qty} ${name}`) : null;
+  const parsedFromQty = rawIngredient.qty ? parseIngredientText(`${rawIngredient.qty} ${cleanedName}`) : null;
   const parsedAmount = Number.isFinite(Number(rawIngredient.amount)) ? Number(rawIngredient.amount) : parsedFromQty?.amount || 1;
   const parsedUnit = rawIngredient.unit || parsedFromQty?.unit || "piece";
-  const category = rawIngredient.category || inferIngredientCategoryFromName(name);
+  const category = rawIngredient.category || inferIngredientCategoryFromName(cleanedName);
 
   return {
-    id: rawIngredient.id || rawIngredient.ingredientId || normalizeName(name),
-    name,
+    id: rawIngredient.id || rawIngredient.ingredientId || normalizeName(cleanedName),
+    name: cleanedName,
     amount: Math.max(Math.round(parsedAmount * 100) / 100, 0.1),
     unit: normalizeUnitAgainstAmount(parsedAmount, parsedUnit),
     category,
@@ -961,7 +982,7 @@ export function cleanShoppingPlan(plan) {
   const rowsByKey = new Map();
 
   (plan?.rows || []).forEach((row) => {
-    const ingredient = `${row.ingredient || ""}`.trim();
+    const ingredient = cleanIngredientName(row.ingredient);
     const qty = `${row.qty || ""}`.replace(/\s+/g, " ").trim();
     if (!ingredient || !qty) {
       return;
@@ -969,7 +990,7 @@ export function cleanShoppingPlan(plan) {
 
     const category = row.category || "pantry";
     const aisleLabel = row.aisleLabel || STORE_AISLE_LABELS[category] || "Other";
-    const key = `${normalizeName(ingredient)}::${normalizeName(qty)}::${category}`;
+    const key = `${normalizeName(ingredient)}::${category}`;
     const existing = rowsByKey.get(key);
     const dishes = `${row.dishUsedIn || ""}`
       .split(",")
@@ -978,6 +999,9 @@ export function cleanShoppingPlan(plan) {
 
     if (existing) {
       existing.expectedPrice += Number(row.expectedPrice || 0);
+      if (!existing.qty.includes(qty)) {
+        existing.qty = `${existing.qty} + ${qty}`;
+      }
       dishes.forEach((dishName) => {
         if (!existing.dishes.includes(dishName)) {
           existing.dishes.push(dishName);
@@ -1060,9 +1084,19 @@ function parseInstructions(text) {
     return [];
   }
 
+  const inlineNumberedSteps = raw
+    .replace(/\r?\n+/g, " ")
+    .split(/\s*(?=(?:step\s*)?\d+[\).]\s+)/i)
+    .map(cleanInstructionStep)
+    .filter(Boolean);
+
+  if (inlineNumberedSteps.length > 1) {
+    return inlineNumberedSteps;
+  }
+
   const paragraphs = raw
     .split(/\r?\n+/)
-    .map((line) => line.trim())
+    .map(cleanInstructionStep)
     .filter(Boolean);
 
   if (paragraphs.length > 1) {
@@ -1071,7 +1105,7 @@ function parseInstructions(text) {
 
   return raw
     .split(/(?<=\.)\s+(?=[A-Z])/)
-    .map((step) => step.trim())
+    .map(cleanInstructionStep)
     .filter(Boolean);
 }
 

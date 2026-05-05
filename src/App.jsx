@@ -978,7 +978,7 @@ function App() {
                   </div>
                 ) : null}
 
-                {visibleShoppingView.exportMessage ? (
+                {visibleShoppingView.exportMessage && !/failed|error/i.test(visibleShoppingView.exportMessage) ? (
                   <p className="summary-copy subtle">{visibleShoppingView.exportMessage}</p>
                 ) : null}
               </>
