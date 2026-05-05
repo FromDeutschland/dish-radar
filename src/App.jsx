@@ -10,6 +10,7 @@ import {
   formatCurrency,
   formatIngredientDisplay,
   generateSyntheticRecipeCollection,
+  getInstantFallbackDishes,
   pushShoppingPlanToGoogleSheet,
   sanitizeStoredDishes,
 } from "./storeLogic";
@@ -320,8 +321,14 @@ function App() {
       .map((dishId) => dishLookup[dishId])
       .filter(Boolean);
     const catalogMatches = searchableDishLibrary.filter((dish) => dish.category === category);
+    const instantFallbacks = getInstantFallbackDishes({
+      category,
+      limit: FAST_DISH_BATCH_SIZE,
+      triedDishes: ratingHistory,
+      customRecipes: searchableDishLibrary,
+    });
 
-    return uniqById([...pooledDishes, ...catalogMatches]);
+    return uniqById([...pooledDishes, ...catalogMatches, ...instantFallbacks]);
   }
 
   async function fillDayPicker({ dayName, category, initialOptions = [], requestedCount, searchText = "" }) {
@@ -401,7 +408,8 @@ function App() {
 
     const cachedOptions = getPoolDishes(category);
     const preload = cachedOptions.slice(0, 20);
-    const requestedCount = preload.length >= FAST_DISH_BATCH_SIZE
+    const onlyInstantFallbacks = preload.length > 0 && preload.every((dish) => dish.meta?.instantFallback);
+    const requestedCount = preload.length >= FAST_DISH_BATCH_SIZE && !onlyInstantFallbacks
       ? 0
       : Math.max(FAST_DISH_BATCH_SIZE - preload.length, 6);
     const startedAt = Date.now();

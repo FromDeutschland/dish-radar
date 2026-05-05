@@ -1,3 +1,7 @@
+import { ARCHIVE_DISH_POOL } from "./archiveDishPool";
+import { DISH_POOL } from "./mockDishPool";
+import { buildRecipeMatrixDishes } from "./recipeMatrix";
+
 const STORE_PROFILES = {
   traderJoes: {
     id: "traderJoes",
@@ -1294,6 +1298,42 @@ function shuffleCollection(items) {
     [next[index], next[swapIndex]] = [next[swapIndex], next[index]];
   }
   return next;
+}
+
+const INSTANT_FALLBACK_LIBRARY = sanitizeStoredDishes([...DISH_POOL, ...ARCHIVE_DISH_POOL]);
+
+export function getInstantFallbackDishes({ category, limit = 10, triedDishes = [], customRecipes = [] }) {
+  const matrixDishes = buildRecipeMatrixDishes(
+    [...INSTANT_FALLBACK_LIBRARY, ...sanitizeStoredDishes(customRecipes)],
+    Array.isArray(triedDishes) ? triedDishes : [],
+    (dish) => dish.category,
+  );
+  const biasKeywords = extractPreferenceKeywords(Array.isArray(triedDishes) ? triedDishes : []);
+  const fallbackLibrary = sanitizeStoredDishes([
+    ...matrixDishes,
+    ...customRecipes,
+    ...INSTANT_FALLBACK_LIBRARY,
+  ]);
+
+  return shuffleCollection(
+    fallbackLibrary
+      .filter((dish) => !category || dish.category === category)
+      .map((dish) => ({
+        dish: {
+          ...dish,
+          meta: {
+            ...(dish.meta || {}),
+            instantFallback: true,
+          },
+        },
+        score:
+          scoreDishAgainstPreferences(dish, biasKeywords)
+          + (category ? scoreCategoryMatch(dish, category) + 8 : 0),
+      })),
+  )
+    .sort((left, right) => right.score - left.score || left.dish.name.localeCompare(right.dish.name))
+    .map(({ dish }) => dish)
+    .slice(0, limit);
 }
 
 export async function fetchDishOptions({ categories, triedDishes, limit = 30, customRecipes = [] }) {
