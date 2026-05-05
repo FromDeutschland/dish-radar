@@ -10,7 +10,6 @@ import {
   formatCurrency,
   formatIngredientDisplay,
   generateSyntheticRecipeCollection,
-  getInstantFallbackDishes,
   pushShoppingPlanToGoogleSheet,
   sanitizeStoredDishes,
 } from "./storeLogic";
@@ -21,6 +20,7 @@ const STORAGE_KEYS = {
   dayDishSelections: "dish-radar.day-dish-selections",
   dishCatalog: "dish-radar.dish-catalog",
   generatedPools: "dish-radar.generated-pools",
+  history: "dish-radar.history",
   lockedWeek: "dish-radar.locked-week",
   pantryCarryover: "dish-radar.pantry-carryover",
   ratingHistory: "dish-radar.rating-history",
@@ -31,6 +31,7 @@ const TABS = [
   { value: "planner", label: "Dish Selection" },
   { value: "recipes", label: "Recipes" },
   { value: "groceries", label: "Grocery List" },
+  { value: "history", label: "History" },
 ];
 
 const WEEKDAY_NAMES = [
@@ -52,7 +53,7 @@ const CATEGORY_OPTIONS = [
   { value: "soups-stews-chilis", label: "Soups, Stews & Chilis" },
 ];
 
-const FAST_DISH_BATCH_SIZE = 10;
+const GEMINI_DISH_BATCH_SIZE = 20;
 
 const CATEGORY_LABELS = Object.fromEntries(CATEGORY_OPTIONS.map((option) => [option.value, option.label]));
 const VALID_TAB_VALUES = new Set(TABS.map((tab) => tab.value));
@@ -125,6 +126,10 @@ function uniqById(dishes) {
   return Array.from(unique.values());
 }
 
+function isGeminiDish(dish) {
+  return Boolean(dish?.meta?.isAI) && !dish?.meta?.instantFallback;
+}
+
 function getDifficultyLabel(time) {
   if (time <= 15) return "easy";
   if (time <= 30) return "medium";
@@ -170,6 +175,7 @@ function buildGeminiPrompt({ category, dayName, searchText, biasKeywords, count 
   }
 
   parts.push("Keep the dishes varied, appealing, and practical for a home cook.");
+  parts.push("Every recipe must be 60 minutes or less, and most should be 30 minutes or less.");
   return parts.join(". ");
 }
 
@@ -194,6 +200,7 @@ function App() {
   const [customCodex, setCustomCodex] = useState(() => sanitizeStoredDishes(safeRead(STORAGE_KEYS.customCodex, [])));
   const [dishCatalog, setDishCatalog] = useState(() => sanitizeStoredDishes(safeRead(STORAGE_KEYS.dishCatalog, [])));
   const [generatedPools, setGeneratedPools] = useState(() => safeRead(STORAGE_KEYS.generatedPools, {}));
+  const [history, setHistory] = useState(() => safeRead(STORAGE_KEYS.history, []));
   const [lockedWeek, setLockedWeek] = useState(() => safeRead(STORAGE_KEYS.lockedWeek, null));
   const [pantryCarryover, setPantryCarryover] = useState(() => safeRead(STORAGE_KEYS.pantryCarryover, []));
   const [ratingHistory] = useState(() => safeRead(STORAGE_KEYS.ratingHistory, []));
@@ -204,7 +211,7 @@ function App() {
   const weekDays = getCurrentWeekDates();
   const biasKeywords = useMemo(() => extractPreferenceKeywords(ratingHistory), [ratingHistory]);
   const searchableDishLibrary = useMemo(
-    () => uniqById([...customCodex, ...dishCatalog]),
+    () => uniqById([...customCodex, ...dishCatalog]).filter(isGeminiDish),
     [customCodex, dishCatalog],
   );
   const dishLookup = useMemo(
@@ -289,6 +296,10 @@ function App() {
   }, [generatedPools]);
 
   useEffect(() => {
+    window.localStorage.setItem(STORAGE_KEYS.history, JSON.stringify(history));
+  }, [history]);
+
+  useEffect(() => {
     window.localStorage.setItem(STORAGE_KEYS.lockedWeek, JSON.stringify(lockedWeek));
   }, [lockedWeek]);
 
@@ -319,16 +330,10 @@ function App() {
   function getPoolDishes(category) {
     const pooledDishes = (generatedPools[category] || [])
       .map((dishId) => dishLookup[dishId])
-      .filter(Boolean);
-    const catalogMatches = searchableDishLibrary.filter((dish) => dish.category === category);
-    const instantFallbacks = getInstantFallbackDishes({
-      category,
-      limit: FAST_DISH_BATCH_SIZE,
-      triedDishes: ratingHistory,
-      customRecipes: searchableDishLibrary,
-    });
+      .filter(isGeminiDish);
+    const catalogMatches = searchableDishLibrary.filter((dish) => dish.category === category && isGeminiDish(dish));
 
-    return uniqById([...pooledDishes, ...catalogMatches, ...instantFallbacks]);
+    return uniqById([...pooledDishes, ...catalogMatches]);
   }
 
   async function fillDayPicker({ dayName, category, initialOptions = [], requestedCount, searchText = "" }) {
@@ -341,7 +346,7 @@ function App() {
         count: requestedCount,
       });
       const freshDishes = await generateSyntheticRecipeCollection(prompt, category, requestedCount);
-      const savedFreshDishes = persistGeneratedDishes(category, freshDishes);
+      const savedFreshDishes = persistGeneratedDishes(category, freshDishes.filter(isGeminiDish));
       const mergedOptions = uniqById([...initialOptions, ...savedFreshDishes]).slice(0, 20);
 
       setGenerationJobs((current) => {
@@ -408,10 +413,9 @@ function App() {
 
     const cachedOptions = getPoolDishes(category);
     const preload = cachedOptions.slice(0, 20);
-    const onlyInstantFallbacks = preload.length > 0 && preload.every((dish) => dish.meta?.instantFallback);
-    const requestedCount = preload.length >= FAST_DISH_BATCH_SIZE && !onlyInstantFallbacks
+    const requestedCount = preload.length >= GEMINI_DISH_BATCH_SIZE
       ? 0
-      : Math.max(FAST_DISH_BATCH_SIZE - preload.length, 6);
+      : Math.max(GEMINI_DISH_BATCH_SIZE - preload.length, 20);
     const startedAt = Date.now();
 
     setGenerationJobs((current) => ({
@@ -575,7 +579,7 @@ function App() {
       dayName: dayPicker.dayName,
       category: dayPicker.category,
       initialOptions: existingOptions,
-      requestedCount: FAST_DISH_BATCH_SIZE,
+      requestedCount: GEMINI_DISH_BATCH_SIZE,
       searchText: dayPicker.searchQuery,
     });
   }
@@ -642,7 +646,7 @@ function App() {
 
     setPantryCarryover(buildFallbackPantryCarryover(finalPlan.inventoryRows));
 
-    setLockedWeek({
+    const lockedWeekRecord = {
       id: `${Date.now()}`,
       weekLabel,
       createdAt: new Date().toISOString(),
@@ -654,6 +658,12 @@ function App() {
         category: entry.category,
         dish: entry.dish,
       })),
+    };
+
+    setLockedWeek(lockedWeekRecord);
+    setHistory((current) => {
+      const withoutDuplicate = current.filter((record) => record.id !== lockedWeekRecord.id);
+      return [lockedWeekRecord, ...withoutDuplicate].slice(0, 52);
     });
     setExportMessage(nextExportMessage);
     setWeekSelections(getDefaultWeekSelections());
@@ -983,6 +993,63 @@ function App() {
     );
   }
 
+  function renderHistoryTab() {
+    return (
+      <div className="workspace single-column-layout">
+        <section className="main-column">
+          <section className="panel">
+            <div className="panel-head">
+              <div>
+                <div className="eyebrow">History</div>
+                <h2>{history.length ? "Past Gemini weeks" : "No saved weeks yet"}</h2>
+              </div>
+              <span className="chip">{history.reduce((total, record) => total + (record.entries?.length || 0), 0)} dishes saved</span>
+            </div>
+
+            {history.length ? (
+              <div className="history-week-list">
+                {history.map((record) => (
+                  <article key={record.id} className="history-week-card">
+                    <div className="panel-head history-week-head">
+                      <div>
+                        <span className="recipe-day">{new Date(record.createdAt).toLocaleDateString("en-US")}</span>
+                        <h3>{record.weekLabel}</h3>
+                      </div>
+                      <span className="chip">{record.entries?.length || 0} recipes</span>
+                    </div>
+
+                    <div className="history-dish-grid">
+                      {(record.entries || []).map((entry) => (
+                        <div key={`${record.id}-${entry.dayName}-${entry.dish.id}`} className="history-dish-card">
+                          <span className="recipe-day">{entry.dayName} • {CATEGORY_LABELS[entry.category]}</span>
+                          <strong>{entry.dish.name}</strong>
+                          <p>{entry.dish.time} min • {formatCalories(estimateDishCalories(entry.dish))} cal</p>
+                          <button
+                            className="mini-button"
+                            onClick={() => {
+                              persistGeneratedDishes(entry.category, [entry.dish]);
+                              setActiveTab("planner");
+                            }}
+                          >
+                            Save for planning
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-copy">
+                Choose Gemini dishes, click <strong>GO SHOP</strong>, and the selected recipes will be archived here for future weeks.
+              </p>
+            )}
+          </section>
+        </section>
+      </div>
+    );
+  }
+
   function renderDayPickerModal() {
     if (!dayPicker.dayName) {
       return null;
@@ -1076,6 +1143,7 @@ function App() {
         {activeTab === "planner" ? renderPlannerTab() : null}
         {activeTab === "recipes" ? renderRecipesTab() : null}
         {activeTab === "groceries" ? renderGroceriesTab() : null}
+        {activeTab === "history" ? renderHistoryTab() : null}
       </main>
 
       {renderDayPickerModal()}

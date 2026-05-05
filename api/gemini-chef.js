@@ -1,7 +1,7 @@
 const GEMINI_MODEL_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent";
 
 export const config = {
-  maxDuration: 10,
+  maxDuration: 30,
 };
 
 function buildSingleSchema() {
@@ -108,7 +108,7 @@ function readPrompt(body) {
 
 async function callGeminiApi({ apiKey, promptText, schema, maxOutputTokens = 8192 }) {
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 9000);
+  const timeoutId = setTimeout(() => controller.abort(), 28000);
 
   try {
     const response = await fetch(GEMINI_MODEL_URL, {
@@ -147,7 +147,7 @@ async function callGeminiApi({ apiKey, promptText, schema, maxOutputTokens = 819
       return {
         ok: false,
         status: 408,
-        data: { error: { message: "Gemini Chef exceeded the 9 second speed budget." } },
+        data: { error: { message: "Gemini Chef exceeded the generation time budget." } },
       };
     }
 
@@ -217,7 +217,7 @@ export default async function handler(request, response) {
         : mode === "pantry_review"
           ? buildPantryReviewSchema()
           : buildCollectionSchema();
-    const maxOutputTokens = mode === "collection" ? 8192 : 4096;
+    const maxOutputTokens = mode === "collection" ? 16384 : 4096;
     const result = await callWithRetry({ apiKey, promptText, schema, maxOutputTokens });
 
     if (!result?.ok) {

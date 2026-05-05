@@ -1,7 +1,3 @@
-import { ARCHIVE_DISH_POOL } from "./archiveDishPool";
-import { DISH_POOL } from "./mockDishPool";
-import { buildRecipeMatrixDishes } from "./recipeMatrix";
-
 const STORE_PROFILES = {
   traderJoes: {
     id: "traderJoes",
@@ -1300,42 +1296,6 @@ function shuffleCollection(items) {
   return next;
 }
 
-const INSTANT_FALLBACK_LIBRARY = sanitizeStoredDishes([...DISH_POOL, ...ARCHIVE_DISH_POOL]);
-
-export function getInstantFallbackDishes({ category, limit = 10, triedDishes = [], customRecipes = [] }) {
-  const matrixDishes = buildRecipeMatrixDishes(
-    [...INSTANT_FALLBACK_LIBRARY, ...sanitizeStoredDishes(customRecipes)],
-    Array.isArray(triedDishes) ? triedDishes : [],
-    (dish) => dish.category,
-  );
-  const biasKeywords = extractPreferenceKeywords(Array.isArray(triedDishes) ? triedDishes : []);
-  const fallbackLibrary = sanitizeStoredDishes([
-    ...matrixDishes,
-    ...customRecipes,
-    ...INSTANT_FALLBACK_LIBRARY,
-  ]);
-
-  return shuffleCollection(
-    fallbackLibrary
-      .filter((dish) => !category || dish.category === category)
-      .map((dish) => ({
-        dish: {
-          ...dish,
-          meta: {
-            ...(dish.meta || {}),
-            instantFallback: true,
-          },
-        },
-        score:
-          scoreDishAgainstPreferences(dish, biasKeywords)
-          + (category ? scoreCategoryMatch(dish, category) + 8 : 0),
-      })),
-  )
-    .sort((left, right) => right.score - left.score || left.dish.name.localeCompare(right.dish.name))
-    .map(({ dish }) => dish)
-    .slice(0, limit);
-}
-
 export async function fetchDishOptions({ categories, triedDishes, limit = 30, customRecipes = [] }) {
   const activeCategories = categories?.length ? categories : ALL_APP_CATEGORIES;
   const biasKeywords = extractPreferenceKeywords(triedDishes);
@@ -1375,6 +1335,7 @@ function buildGeminiRecipePrompt(prompt, category) {
     `Target meal category: "${categoryLabel}".`,
     "Return only JSON that matches the supplied schema.",
     "Use realistic quantities for 2 to 4 servings.",
+    "Prep time must never exceed 60 minutes. Prefer 15 to 30 minutes whenever the recipe still feels complete.",
     "Set calories to a realistic positive estimate for the entire recipe based on the raw ingredients. Never return 0 calories.",
     "Write instructions as one compact string with 3 to 4 numbered steps.",
     "Make the dish feel polished, practical, and appealing for home cooking.",
@@ -1391,7 +1352,7 @@ async function callGeminiChefApi(body) {
     }
 
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 9500);
+    const timeoutId = window.setTimeout(() => controller.abort(), 28000);
 
     try {
       const response = await fetch("/api/gemini-chef", {
@@ -1442,13 +1403,14 @@ function normalizeSyntheticRecipe(payload, fallbackCategory, prompt) {
   const instructions = parseInstructions(payload.instructions || "");
   const ingredients = (payload.ingredients || []).map(normalizeIngredientRecord).filter(Boolean);
   const category = normalizeAppCategory(payload.category) || normalizeAppCategory(fallbackCategory) || "balanced-plate";
-  const prepTimeMinutes = Number.isFinite(Number(payload.meta?.prepTimeMinutes))
+  const rawPrepTimeMinutes = Number.isFinite(Number(payload.meta?.prepTimeMinutes))
     ? Number(payload.meta.prepTimeMinutes)
     : estimatePrepTime(
       { strMeal: payload.name, strInstructions: instructions.join(" "), strCategory: category },
       ingredients.length,
       instructions.length,
     );
+  const prepTimeMinutes = Math.max(10, Math.min(60, Math.round(rawPrepTimeMinutes / 5) * 5));
 
   return normalizeDishRecord({
     id: payload.id || `gemini-${normalizeName(payload.name || prompt)}-${Date.now()}`,
@@ -1491,6 +1453,7 @@ export async function generateSyntheticRecipeCollection(prompt, category = "bala
       buildGeminiRecipePrompt(prompt, category),
       `Create ${count} distinct recipe options for this prompt instead of one.`,
       "Keep each recipe compact: 6 to 9 ingredients and 3 to 4 concise numbered instruction steps.",
+      "All recipe prep times must be 60 minutes or less. At least 14 of the 20 should be 30 minutes or less when count is 20.",
       "Vary the proteins, sauces, aromatics, or produce so the dish options feel genuinely different from each other.",
     ].join("\n"),
   });
