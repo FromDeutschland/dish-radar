@@ -844,6 +844,54 @@ th {
   width: min(640px, 100%);
 }
 
+.go-shop-modal {
+  width: min(520px, 100%);
+  display: grid;
+  justify-items: center;
+  gap: 14px;
+  text-align: center;
+}
+
+.go-shop-modal .summary-copy {
+  margin: 8px 0 0;
+}
+
+.go-shop-modal-error {
+  box-shadow: 0 24px 60px rgba(154, 52, 18, 0.2);
+}
+
+.go-shop-status-mark {
+  width: 58px;
+  height: 58px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  font-size: 1.45rem;
+  font-weight: 900;
+  background: linear-gradient(135deg, #2f855a, #68a86f);
+  box-shadow: 0 16px 36px rgba(47, 133, 90, 0.26);
+}
+
+.go-shop-modal-error .go-shop-status-mark {
+  background: linear-gradient(135deg, #c2410c, #f97316);
+}
+
+.qc-spinner {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 3px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  animation: qc-spin 0.8s linear infinite;
+}
+
+@keyframes qc-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .modal-option-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

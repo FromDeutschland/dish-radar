@@ -13,6 +13,7 @@ import {
   generateSyntheticRecipeIdeas,
   pushShoppingPlanToGoogleSheet,
   sanitizeStoredDishes,
+  screenShoppingPlan,
 } from "./storeLogic";
 
 const STORAGE_KEYS = {
@@ -209,6 +210,7 @@ function App() {
   const [dayPicker, setDayPicker] = useState(() => createEmptyDayPicker());
   const [generationJobs, setGenerationJobs] = useState({});
   const [exportMessage, setExportMessage] = useState("");
+  const [goShopStatus, setGoShopStatus] = useState({ phase: "", message: "", detail: "" });
 
   const weekDays = getCurrentWeekDates();
   const biasKeywords = useMemo(() => extractPreferenceKeywords(ratingHistory), [ratingHistory]);
@@ -651,14 +653,36 @@ function App() {
   }
 
   async function handleGoShop() {
-    const finalPlan = screenedCurrentShoppingPlan || currentShoppingPlan;
+    const basePlan = screenedCurrentShoppingPlan || currentShoppingPlan;
 
-    if (!finalPlan || !selectedDayEntries.length) {
+    if (!basePlan || !selectedDayEntries.length || goShopStatus.phase === "reviewing") {
       return;
     }
 
     const confirmed = window.confirm("ARE YOU SURE?");
     if (!confirmed) {
+      return;
+    }
+
+    setGoShopStatus({
+      phase: "reviewing",
+      message: "Please wait",
+      detail: "Gemini is reviewing the grocery list, removing nonsense items, merging duplicates, and cleaning aisle placement before publication.",
+    });
+
+    let finalPlan;
+    let qcNote = "";
+
+    try {
+      const reviewed = await screenShoppingPlan(basePlan);
+      finalPlan = cleanShoppingPlan(reviewed.plan);
+      qcNote = reviewed.note;
+    } catch (error) {
+      setGoShopStatus({
+        phase: "error",
+        message: "Gemini QC did not finish",
+        detail: error.message || "The grocery list was not published. Please retry Go Shop in a moment.",
+      });
       return;
     }
 
@@ -714,7 +738,12 @@ function App() {
     setWeekSelections(getDefaultWeekSelections());
     setDayDishSelections({});
     setDayPicker(createEmptyDayPicker());
-    setActiveTab("recipes");
+    setActiveTab("groceries");
+    setGoShopStatus({
+      phase: "ready",
+      message: "You may now proceed",
+      detail: qcNote || "Gemini QC finished and the cleaned grocery list is ready.",
+    });
   }
 
   function renderPlannerTab() {
@@ -842,9 +871,13 @@ function App() {
                   ))}
                 </div>
 
-                <button className="hero-shop-button" onClick={handleGoShop}>
-                  <span>GO SHOP</span>
-                  <small>Lock this week, save recipes, and build groceries.</small>
+                <button className="hero-shop-button" onClick={handleGoShop} disabled={goShopStatus.phase === "reviewing"}>
+                  <span>{goShopStatus.phase === "reviewing" ? "PLEASE WAIT" : "GO SHOP"}</span>
+                  <small>
+                    {goShopStatus.phase === "reviewing"
+                      ? "Gemini is QC’ing the grocery list before publication."
+                      : "Lock this week, save recipes, and build groceries."}
+                  </small>
                 </button>
               </>
             ) : (
@@ -1017,8 +1050,8 @@ function App() {
 
                 {visibleShoppingView.live ? (
                   <div className="side-actions compact-actions">
-                    <button className="action-button wide" onClick={handleGoShop}>
-                      GO SHOP
+                    <button className="action-button wide" onClick={handleGoShop} disabled={goShopStatus.phase === "reviewing"}>
+                      {goShopStatus.phase === "reviewing" ? "PLEASE WAIT" : "GO SHOP"}
                     </button>
                   </div>
                 ) : null}
@@ -1167,6 +1200,44 @@ function App() {
     );
   }
 
+  function renderGoShopStatusModal() {
+    if (!goShopStatus.phase) {
+      return null;
+    }
+
+    const isReviewing = goShopStatus.phase === "reviewing";
+    const isReady = goShopStatus.phase === "ready";
+    const isError = goShopStatus.phase === "error";
+
+    return (
+      <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Go Shop status">
+        <div className={`modal-card go-shop-modal ${isError ? "go-shop-modal-error" : ""}`}>
+          <div className="go-shop-status-mark" aria-hidden="true">
+            {isReviewing ? <span className="qc-spinner" /> : isReady ? "✓" : "!"}
+          </div>
+          <div>
+            <span className="eyebrow">Gemini grocery QC</span>
+            <h2>{goShopStatus.message}</h2>
+            <p className="summary-copy">{goShopStatus.detail}</p>
+          </div>
+          {isReviewing ? null : (
+            <div className="modal-actions">
+              {isError ? (
+                <button className="action-button" onClick={() => setGoShopStatus({ phase: "", message: "", detail: "" })}>
+                  Close and retry
+                </button>
+              ) : (
+                <button className="action-button" onClick={() => setGoShopStatus({ phase: "", message: "", detail: "" })}>
+                  View cleaned grocery list
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="page-shell">
       <header className="site-header simple-header">
@@ -1196,6 +1267,7 @@ function App() {
       </main>
 
       {renderDayPickerModal()}
+      {renderGoShopStatusModal()}
     </div>
   );
 }

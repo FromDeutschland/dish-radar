@@ -447,12 +447,43 @@ function cleanInstructionStep(step) {
 function cleanIngredientName(value) {
   return `${value || ""}`
     .replace(/\([^)]*\)/g, "")
+    .replace(/^\s*for\s+(?:the\s+)?[^:]+:\s*$/gi, "")
+    .replace(/^\s*for\s+(?:the\s+)?[^:]+:\s*/gi, "")
     .replace(/\b(?:finely|roughly|thinly|coarsely)\s+(?:chopped|diced|minced|sliced|grated)\b/gi, "")
-    .replace(/\b(?:chopped|diced|minced|sliced|grated|shredded|crushed|peeled|seeded|cooked|raw|fresh)\b/gi, "")
+    .replace(/\b(?:chopped|diced|minced|sliced|grated|shredded|crushed|peeled|seeded|cooked|raw|fresh|freshly|ground|toasted|halved|divided)\b/gi, "")
     .replace(/\bto taste\b/gi, "")
+    .replace(/\b(?:for serving|to serve|for garnish|to garnish)\b/gi, "")
+    .replace(/\b(?:and|or|with)\s*$/gi, "")
     .replace(/\s*,\s*/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function shouldKeepShoppingIngredient(ingredient) {
+  const cleaned = cleanIngredientName(ingredient);
+  const normalized = normalizeText(cleaned).replace(/[:.]+$/g, "").trim();
+
+  if (!normalized || normalized.length < 2) {
+    return false;
+  }
+
+  if (/^(?:warm|hot|cold|boiling|ice|filtered|room temperature)?\s*water$/.test(normalized)) {
+    return false;
+  }
+
+  if (/^(?:for\s+)?(?:the\s+)?(?:dressing|sauce|marinade|garnish|serving|topping|assembly)$/.test(normalized)) {
+    return false;
+  }
+
+  if (/\b(?:and|or|with|plus|for)$/.test(normalized)) {
+    return false;
+  }
+
+  if (/^[^a-z0-9]*(?:optional|as needed|to taste)[^a-z0-9]*$/.test(normalized)) {
+    return false;
+  }
+
+  return true;
 }
 
 export function formatIngredientDisplay(ingredient) {
@@ -721,7 +752,7 @@ function normalizeIngredientRecord(rawIngredient) {
 
   if (typeof rawIngredient === "string") {
     const parsed = parseIngredientText(rawIngredient);
-    if (!parsed?.name) {
+    if (!parsed?.name || !shouldKeepShoppingIngredient(parsed.name)) {
       return null;
     }
 
@@ -738,7 +769,7 @@ function normalizeIngredientRecord(rawIngredient) {
 
   const name = `${rawIngredient.name || rawIngredient.ingredient || ""}`.trim();
   const cleanedName = cleanIngredientName(name);
-  if (!cleanedName) {
+  if (!cleanedName || !shouldKeepShoppingIngredient(cleanedName)) {
     return null;
   }
 
@@ -984,7 +1015,7 @@ export function cleanShoppingPlan(plan) {
   (plan?.rows || []).forEach((row) => {
     const ingredient = cleanIngredientName(row.ingredient);
     const qty = `${row.qty || ""}`.replace(/\s+/g, " ").trim();
-    if (!ingredient || !qty) {
+    if (!ingredient || !qty || !shouldKeepShoppingIngredient(ingredient)) {
       return;
     }
 
@@ -1572,7 +1603,7 @@ export async function generateSyntheticRecipeCollection(prompt, category = "bala
 }
 
 function normalizeReviewedGroceryRow(rawRow, fallbackRow) {
-  const ingredient = `${rawRow?.ingredient || fallbackRow?.ingredient || ""}`.trim();
+  const ingredient = cleanIngredientName(rawRow?.ingredient || fallbackRow?.ingredient || "");
   const qty = `${rawRow?.qty || fallbackRow?.qty || ""}`.trim();
   const dishUsedIn = `${rawRow?.dishUsedIn || fallbackRow?.dishUsedIn || ""}`.trim();
   const category = cleanTag(rawRow?.category || fallbackRow?.category || "") || fallbackRow?.category || "pantry";
@@ -1581,7 +1612,7 @@ function normalizeReviewedGroceryRow(rawRow, fallbackRow) {
     ? Number(rawRow.expectedPrice)
     : Number(fallbackRow?.expectedPrice || 0);
 
-  if (!ingredient || !qty) {
+  if (!ingredient || !qty || !shouldKeepShoppingIngredient(ingredient)) {
     return null;
   }
 
@@ -1600,11 +1631,16 @@ export async function screenShoppingPlan(plan) {
   const payload = await callGeminiChefApi({
     mode: "shopping_review",
     promptText: [
-      "You are reviewing a grocery list before it is shown to the user.",
-      "Clean up duplicates, merge obvious repeat ingredients, remove anomalies, and normalize wording.",
+      "You are Gemini Grocery QC, reviewing a grocery list before it is published to the user.",
+      "Return a polished shopping list only. Every returned row must be a real item a person would intentionally buy at a grocery store.",
+      "Remove non-shopping items and recipe artifacts: warm water, hot water, cold water, ice water, section headers like 'For the dressing:', incomplete fragments like 'chicken or' or 'sweet potato and', cooking instructions, prep notes, and empty/generic rows.",
+      "Clean prep wording from ingredients: remove words like chopped, diced, toasted, halved, divided, for serving, to taste, finely, roughly, and garnish.",
+      "Merge obvious duplicates and variants. Examples: salt + salt and black pepper should become the most useful buyable row; pepper + black pepper should become black pepper; olive oil + extra virgin olive oil should become olive oil unless the recipe specifically requires extra virgin.",
       "Do not invent new ingredients.",
-      "Do not materially change pricing except when duplicate rows are merged.",
+      "Do not materially change pricing except when duplicate rows are merged or nonsense rows are removed.",
+      "If a row is removed, do not include it in the returned rows.",
       "Preserve realistic aisle grouping and keep the list concise and clean.",
+      "Return the note as a short plain-English summary of what QC changed.",
       `Input rows: ${JSON.stringify(plan.rows)}`,
     ].join("\n"),
   });

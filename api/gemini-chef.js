@@ -254,7 +254,7 @@ export default async function handler(request, response) {
         : mode === "pantry_review"
           ? buildPantryReviewSchema()
           : buildCollectionSchema();
-    const maxOutputTokens = mode === "collection" ? 16384 : mode === "ideas" ? 8192 : 4096;
+    const maxOutputTokens = mode === "collection" ? 16384 : mode === "ideas" || mode === "shopping_review" ? 8192 : 4096;
     const result = await callWithRetry({ apiKey, promptText, schema, maxOutputTokens });
 
     if (!result?.ok) {
