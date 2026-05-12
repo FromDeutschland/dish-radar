@@ -48,6 +48,41 @@ function buildCollectionSchema() {
   };
 }
 
+function buildIdeasSchema() {
+  return {
+    type: "object",
+    properties: {
+      recipes: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            category: { type: "string" },
+            calories: { type: "integer" },
+            meta: {
+              type: "object",
+              properties: {
+                isAI: { type: "boolean" },
+                cuisine: { type: "string" },
+                tags: {
+                  type: "array",
+                  items: { type: "string" },
+                },
+                prepTimeMinutes: { type: "integer" },
+              },
+              required: ["isAI", "prepTimeMinutes"],
+            },
+          },
+          required: ["name", "category", "calories", "meta"],
+        },
+      },
+    },
+    required: ["recipes"],
+  };
+}
+
 function buildShoppingReviewSchema() {
   return {
     type: "object",
@@ -200,7 +235,7 @@ export default async function handler(request, response) {
   }
 
   const body = typeof request.body === "string" ? JSON.parse(request.body || "{}") : (request.body || {});
-  const supportedModes = new Set(["single", "collection", "shopping_review", "pantry_review"]);
+  const supportedModes = new Set(["single", "collection", "ideas", "shopping_review", "pantry_review"]);
   const mode = supportedModes.has(body.mode) ? body.mode : "collection";
   const promptText = readPrompt(body);
 
@@ -212,12 +247,14 @@ export default async function handler(request, response) {
   try {
     const schema = mode === "single"
       ? buildSingleSchema()
+      : mode === "ideas"
+        ? buildIdeasSchema()
       : mode === "shopping_review"
         ? buildShoppingReviewSchema()
         : mode === "pantry_review"
           ? buildPantryReviewSchema()
           : buildCollectionSchema();
-    const maxOutputTokens = mode === "collection" ? 16384 : 4096;
+    const maxOutputTokens = mode === "collection" ? 16384 : mode === "ideas" ? 8192 : 4096;
     const result = await callWithRetry({ apiKey, promptText, schema, maxOutputTokens });
 
     if (!result?.ok) {

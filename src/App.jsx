@@ -9,7 +9,8 @@ import {
   formatCalories,
   formatCurrency,
   formatIngredientDisplay,
-  generateSyntheticRecipeCollection,
+  generateSyntheticRecipe,
+  generateSyntheticRecipeIdeas,
   pushShoppingPlanToGoogleSheet,
   sanitizeStoredDishes,
 } from "./storeLogic";
@@ -145,6 +146,7 @@ function createEmptyDayPicker() {
     error: "",
     searchQuery: "",
     notice: "",
+    selectingDishId: "",
   };
 }
 
@@ -345,7 +347,7 @@ function App() {
         biasKeywords,
         count: requestedCount,
       });
-      const freshDishes = await generateSyntheticRecipeCollection(prompt, category, requestedCount);
+      const freshDishes = await generateSyntheticRecipeIdeas(prompt, category, requestedCount);
       const savedFreshDishes = persistGeneratedDishes(category, freshDishes.filter(isGeminiDish));
       const mergedOptions = uniqById([...initialOptions, ...savedFreshDishes]).slice(0, 20);
 
@@ -456,7 +458,7 @@ function App() {
           }),
         };
       });
-    }, 10000);
+    }, 30000);
 
     await fillDayPicker({
       dayName,
@@ -531,10 +533,53 @@ function App() {
     }
   }
 
-  function applyDayDishSelection(dayName, dish) {
-    persistGeneratedDishes(dish.category || dayPicker.category, [dish]);
-    setDayDishSelections((current) => ({ ...current, [dayName]: dish.id }));
-    setDayPicker(createEmptyDayPicker());
+  async function applyDayDishSelection(dayName, dish) {
+    const category = dish.category || dayPicker.category;
+    const needsFullRecipe = dish.meta?.ideaOnly || !(dish.ingredients || []).length || !(dish.instructions || []).length;
+
+    setDayPicker((current) => ({
+      ...current,
+      selectingDishId: dish.id,
+      error: "",
+      notice: needsFullRecipe
+        ? `Building the full recipe for ${dish.name}...`
+        : `Saving ${dish.name}...`,
+    }));
+
+    try {
+      const selectedDish = needsFullRecipe
+        ? {
+            ...(await generateSyntheticRecipe(
+              `Create the complete recipe for "${dish.name}" as a ${CATEGORY_LABELS[category] || "dinner"} dinner. Include exact ingredient quantities and concise cooking instructions.`,
+              category,
+            )),
+            id: dish.id,
+            name: dish.name,
+            category,
+          }
+        : dish;
+
+      const normalizedSelection = {
+        ...selectedDish,
+        meta: {
+          ...(selectedDish.meta || {}),
+          isAI: true,
+          ideaOnly: false,
+          selectedAt: new Date().toISOString(),
+        },
+      };
+
+      persistGeneratedDishes(category, [normalizedSelection]);
+      setDayDishSelections((current) => ({ ...current, [dayName]: normalizedSelection.id }));
+      setDayPicker(createEmptyDayPicker());
+    } catch (error) {
+      setDayPicker((current) => ({
+        ...current,
+        selectingDishId: "",
+        error: error.message || "Gemini Chef could not finish that recipe. Please try another dish or retry.",
+        notice: "The idea list is still available. Select again to retry the full recipe.",
+      }));
+    }
   }
 
   function clearDayDishSelection(dayName) {
@@ -1081,7 +1126,7 @@ function App() {
                 value={dayPicker.searchQuery}
                 onChange={(event) => setDayPicker((current) => ({ ...current, searchQuery: event.target.value }))}
               />
-              <button className="action-button" onClick={curateSearch} disabled={dayPicker.loading}>
+              <button className="action-button" onClick={curateSearch} disabled={dayPicker.loading || Boolean(dayPicker.selectingDishId)}>
                 {dayPicker.loading ? "Curating..." : "Curate fast"}
               </button>
             </div>
@@ -1104,8 +1149,12 @@ function App() {
                     <strong>{dish.name}</strong>
                     <p>{CATEGORY_LABELS[dish.category]} • {dish.time} min • {formatCalories(estimateDishCalories(dish))} cal</p>
                   </div>
-                  <button className="action-button" onClick={() => applyDayDishSelection(dayPicker.dayName, dish)}>
-                    Select
+                  <button
+                    className="action-button"
+                    onClick={() => applyDayDishSelection(dayPicker.dayName, dish)}
+                    disabled={Boolean(dayPicker.selectingDishId)}
+                  >
+                    {dayPicker.selectingDishId === dish.id ? "Building..." : "Select"}
                   </button>
                 </div>
               ))}

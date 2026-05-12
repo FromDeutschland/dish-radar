@@ -1477,6 +1477,58 @@ export async function generateSyntheticRecipe(prompt, category = "balanced-plate
   return normalizeSyntheticRecipe(payload, category, prompt);
 }
 
+function normalizeSyntheticRecipeIdea(payload, fallbackCategory, prompt, index) {
+  const category = normalizeAppCategory(payload.category) || normalizeAppCategory(fallbackCategory) || "balanced-plate";
+  const rawPrepTimeMinutes = Number.isFinite(Number(payload.meta?.prepTimeMinutes))
+    ? Number(payload.meta.prepTimeMinutes)
+    : 30;
+  const prepTimeMinutes = Math.max(10, Math.min(60, Math.round(rawPrepTimeMinutes / 5) * 5));
+
+  return normalizeDishRecord({
+    id: payload.id || `gemini-idea-${normalizeName(payload.name || `${prompt}-${index + 1}`)}-${Date.now()}-${index + 1}`,
+    name: payload.name || `Gemini dinner idea ${index + 1}`,
+    category,
+    time: prepTimeMinutes,
+    calories: Number.isFinite(Number(payload.calories)) && Number(payload.calories) > 0 ? Number(payload.calories) : null,
+    trendNote: "Gemini-generated recipe idea. Select it to build the full recipe.",
+    sources: ["Gemini Chef"],
+    cuisines: payload.meta?.cuisine ? [payload.meta.cuisine] : [],
+    tags: Array.isArray(payload.meta?.tags) ? payload.meta.tags : [],
+    instructions: [],
+    ingredients: [],
+    meta: {
+      ...(payload.meta || {}),
+      isAI: true,
+      ideaOnly: true,
+      prompt,
+      generatedAt: new Date().toISOString(),
+    },
+  });
+}
+
+export async function generateSyntheticRecipeIdeas(prompt, category = "balanced-plate", count = 20) {
+  const payload = await callGeminiChefApi({
+    mode: "ideas",
+    prompt,
+    category,
+    count,
+    promptText: [
+      "You are Gemini Chef, generating fast dinner ideas for a weekly meal planner.",
+      `Create exactly ${count} distinct recipe ideas for this request: "${prompt}".`,
+      `Target meal category: "${normalizeAppCategory(category) || category}".`,
+      "Return only JSON matching the schema.",
+      "Do not include ingredients or instructions in this response.",
+      "Each idea must include name, category, realistic total calories, cuisine/tags, and prepTimeMinutes.",
+      "Every prepTimeMinutes value must be 60 or less. Prefer 15 to 30 minutes for most ideas.",
+      "Make the ideas varied, polished, practical, and appetizing.",
+    ].join("\n"),
+  });
+  const recipes = Array.isArray(payload.recipes) ? payload.recipes : [];
+  return recipes
+    .map((recipe, index) => normalizeSyntheticRecipeIdea(recipe, category, prompt, index))
+    .filter(Boolean);
+}
+
 export async function generateSyntheticRecipeCollection(prompt, category = "balanced-plate", count = 20) {
   const payload = await callGeminiChefApi({
     mode: "collection",
