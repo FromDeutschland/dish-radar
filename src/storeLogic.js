@@ -144,7 +144,8 @@ const CATEGORY_UNIT_CALORIES = {
 const GOOGLE_SHEET_URL = "https://docs.google.com/spreadsheets/d/1Tk4ny0z2fEUUquuvBwBpLQMhTt9BsGpep69l0RmvxmE/edit?gid=0#gid=0";
 export const INGREDIENT_LIBRARY_UPDATED_AT = "2026-04-19";
 
-const THEMEALDB_API_KEY = import.meta.env.VITE_THEMEALDB_API_KEY || "1";
+const VITE_ENV = import.meta.env || {};
+const THEMEALDB_API_KEY = VITE_ENV.VITE_THEMEALDB_API_KEY || "1";
 const THEMEALDB_BASE = `https://www.themealdb.com/api/json/v1/${THEMEALDB_API_KEY}`;
 const THEMEALDB_LETTERS = "abcdefghijklmnopqrstuvwxyz".split("");
 const ALL_APP_CATEGORIES = [
@@ -459,8 +460,31 @@ function cleanIngredientName(value) {
     .trim();
 }
 
+function canonicalShoppingIngredientName(value) {
+  const cleaned = cleanIngredientName(value);
+  const normalized = normalizeText(cleaned);
+
+  if (/^(?:pepper|black pepper|ground black pepper|freshly ground black pepper|cracked black pepper)$/.test(normalized)) {
+    return "black pepper";
+  }
+
+  if (/^(?:salt|kosher salt|sea salt|fine salt|table salt)$/.test(normalized)) {
+    return "salt";
+  }
+
+  if (/^salt\s+(?:and|&)\s+(?:freshly\s+)?(?:ground\s+)?black pepper$/.test(normalized)) {
+    return "black pepper";
+  }
+
+  if (/^extra virgin olive oil$/.test(normalized)) {
+    return "olive oil";
+  }
+
+  return cleaned;
+}
+
 function shouldKeepShoppingIngredient(ingredient) {
-  const cleaned = cleanIngredientName(ingredient);
+  const cleaned = canonicalShoppingIngredientName(ingredient);
   const normalized = normalizeText(cleaned).replace(/[:.]+$/g, "").trim();
 
   if (!normalized || normalized.length < 2) {
@@ -650,9 +674,40 @@ function formatShoppingQty(amount, unit) {
   return formatQty(amount, unit);
 }
 
+function parseShoppingQty(value) {
+  const text = `${value || ""}`.trim();
+  const match = text.match(/^(\d+(?:\.\d+)?)\s*([a-zA-Z]+)?$/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    amount: Number(match[1]),
+    unit: cleanMeasure(match[2] || "piece"),
+  };
+}
+
+function mergeShoppingQty(existingQty, nextQty) {
+  const existing = parseShoppingQty(existingQty);
+  const next = parseShoppingQty(nextQty);
+
+  if (existing && next && existing.unit === next.unit) {
+    return formatShoppingQty(existing.amount + next.amount, existing.unit);
+  }
+
+  if (`${existingQty}`.trim() === `${nextQty}`.trim()) {
+    return existingQty;
+  }
+
+  return `${existingQty} + ${nextQty}`;
+}
+
 function inferIngredientCategoryFromName(name) {
   const food = normalizeText(name);
 
+  if (/^(salt|pepper|black pepper|kosher salt|sea salt|olive oil|extra virgin olive oil)$/.test(food)) {
+    return "pantry";
+  }
   if (/(chicken|beef|pork|turkey|lamb|goat|duck|sausage|meatball|tofu)/.test(food)) {
     return "protein";
   }
@@ -1013,14 +1068,14 @@ export function cleanShoppingPlan(plan) {
   const rowsByKey = new Map();
 
   (plan?.rows || []).forEach((row) => {
-    const ingredient = cleanIngredientName(row.ingredient);
+    const ingredient = canonicalShoppingIngredientName(row.ingredient);
     const qty = `${row.qty || ""}`.replace(/\s+/g, " ").trim();
     if (!ingredient || !qty || !shouldKeepShoppingIngredient(ingredient)) {
       return;
     }
 
-    const category = row.category || "pantry";
-    const aisleLabel = row.aisleLabel || STORE_AISLE_LABELS[category] || "Other";
+    const category = inferIngredientCategoryFromName(ingredient) || row.category || "pantry";
+    const aisleLabel = STORE_AISLE_LABELS[category] || row.aisleLabel || "Other";
     const key = `${normalizeName(ingredient)}::${category}`;
     const existing = rowsByKey.get(key);
     const dishes = `${row.dishUsedIn || ""}`
@@ -1030,9 +1085,7 @@ export function cleanShoppingPlan(plan) {
 
     if (existing) {
       existing.expectedPrice += Number(row.expectedPrice || 0);
-      if (!existing.qty.includes(qty)) {
-        existing.qty = `${existing.qty} + ${qty}`;
-      }
+      existing.qty = mergeShoppingQty(existing.qty, qty);
       dishes.forEach((dishName) => {
         if (!existing.dishes.includes(dishName)) {
           existing.dishes.push(dishName);
@@ -1603,11 +1656,14 @@ export async function generateSyntheticRecipeCollection(prompt, category = "bala
 }
 
 function normalizeReviewedGroceryRow(rawRow, fallbackRow) {
-  const ingredient = cleanIngredientName(rawRow?.ingredient || fallbackRow?.ingredient || "");
+  const ingredient = canonicalShoppingIngredientName(rawRow?.ingredient || fallbackRow?.ingredient || "");
   const qty = `${rawRow?.qty || fallbackRow?.qty || ""}`.trim();
   const dishUsedIn = `${rawRow?.dishUsedIn || fallbackRow?.dishUsedIn || ""}`.trim();
-  const category = cleanTag(rawRow?.category || fallbackRow?.category || "") || fallbackRow?.category || "pantry";
-  const aisleLabel = `${rawRow?.aisleLabel || fallbackRow?.aisleLabel || "Other"}`.trim();
+  const category = inferIngredientCategoryFromName(ingredient)
+    || cleanTag(rawRow?.category || fallbackRow?.category || "")
+    || fallbackRow?.category
+    || "pantry";
+  const aisleLabel = STORE_AISLE_LABELS[category] || `${rawRow?.aisleLabel || fallbackRow?.aisleLabel || "Other"}`.trim();
   const expectedPrice = Number.isFinite(Number(rawRow?.expectedPrice))
     ? Number(rawRow.expectedPrice)
     : Number(fallbackRow?.expectedPrice || 0);
@@ -1635,7 +1691,7 @@ export async function screenShoppingPlan(plan) {
       "Return a polished shopping list only. Every returned row must be a real item a person would intentionally buy at a grocery store.",
       "Remove non-shopping items and recipe artifacts: warm water, hot water, cold water, ice water, section headers like 'For the dressing:', incomplete fragments like 'chicken or' or 'sweet potato and', cooking instructions, prep notes, and empty/generic rows.",
       "Clean prep wording from ingredients: remove words like chopped, diced, toasted, halved, divided, for serving, to taste, finely, roughly, and garnish.",
-      "Merge obvious duplicates and variants. Examples: salt + salt and black pepper should become the most useful buyable row; pepper + black pepper should become black pepper; olive oil + extra virgin olive oil should become olive oil unless the recipe specifically requires extra virgin.",
+      "Merge obvious duplicates and variants, and preserve total needed quantity when rows are merged. Examples: pepper + black pepper + salt and black pepper variants should become one black pepper row with the combined quantity; olive oil + extra virgin olive oil should become olive oil unless the recipe specifically requires extra virgin.",
       "Do not invent new ingredients.",
       "Do not materially change pricing except when duplicate rows are merged or nonsense rows are removed.",
       "If a row is removed, do not include it in the returned rows.",
@@ -1736,7 +1792,7 @@ export async function screenPantryCarryover(rows) {
 }
 
 export async function pushShoppingPlanToGoogleSheet(payload) {
-  const scriptUrl = import.meta.env.VITE_GOOGLE_SCRIPT_URL;
+  const scriptUrl = VITE_ENV.VITE_GOOGLE_SCRIPT_URL;
 
   if (!scriptUrl) {
     return { ok: false, skipped: true, reason: "Missing Google Apps Script URL." };
