@@ -1507,7 +1507,11 @@ function normalizeSyntheticRecipeIdea(payload, fallbackCategory, prompt, index) 
 }
 
 export async function generateSyntheticRecipeIdeas(prompt, category = "balanced-plate", count = 20) {
-  const batchSizes = count > 10 ? [10, count - 10].filter(Boolean) : [count];
+  const batchSize = 5;
+  const batchSizes = Array.from({ length: Math.ceil(count / batchSize) }, (_, index) => {
+    const remaining = count - index * batchSize;
+    return Math.min(batchSize, remaining);
+  }).filter(Boolean);
   const requests = batchSizes.map((batchCount, batchIndex) => callGeminiChefApi({
     mode: "ideas",
     prompt,
