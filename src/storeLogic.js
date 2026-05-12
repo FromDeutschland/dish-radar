@@ -1507,23 +1507,34 @@ function normalizeSyntheticRecipeIdea(payload, fallbackCategory, prompt, index) 
 }
 
 export async function generateSyntheticRecipeIdeas(prompt, category = "balanced-plate", count = 20) {
-  const payload = await callGeminiChefApi({
+  const batchSizes = count > 10 ? [10, count - 10].filter(Boolean) : [count];
+  const requests = batchSizes.map((batchCount, batchIndex) => callGeminiChefApi({
     mode: "ideas",
     prompt,
     category,
-    count,
+    count: batchCount,
     promptText: [
       "You are Gemini Chef, generating fast dinner ideas for a weekly meal planner.",
-      `Create exactly ${count} distinct recipe ideas for this request: "${prompt}".`,
+      `Create exactly ${batchCount} distinct recipe ideas for this request: "${prompt}".`,
       `Target meal category: "${normalizeAppCategory(category) || category}".`,
+      `This is batch ${batchIndex + 1}; make these ideas different from the other batch.`,
       "Return only JSON matching the schema.",
       "Do not include ingredients or instructions in this response.",
       "Each idea must include name, category, realistic total calories, cuisine/tags, and prepTimeMinutes.",
       "Every prepTimeMinutes value must be 60 or less. Prefer 15 to 30 minutes for most ideas.",
       "Make the ideas varied, polished, practical, and appetizing.",
     ].join("\n"),
-  });
-  const recipes = Array.isArray(payload.recipes) ? payload.recipes : [];
+  }));
+  const results = await Promise.allSettled(requests);
+  const recipes = results
+    .filter((result) => result.status === "fulfilled")
+    .flatMap((result) => (Array.isArray(result.value.recipes) ? result.value.recipes : []));
+
+  if (!recipes.length) {
+    const firstFailure = results.find((result) => result.status === "rejected");
+    throw firstFailure?.reason || new Error("Gemini Chef could not generate ideas right now.");
+  }
+
   return recipes
     .map((recipe, index) => normalizeSyntheticRecipeIdea(recipe, category, prompt, index))
     .filter(Boolean);
